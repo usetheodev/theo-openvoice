@@ -2,8 +2,9 @@
 
 **Versao**: 1.0
 **Base**: PRD v2.1, ARCHITECTURE.md v1.0
-**Status**: Aprovado pelo Time de Arquitetura (ARCH)
+**Status**: Em execucao
 **Data**: 2026-02-07
+**Ultima atualizacao**: 2026-02-07
 
 **Autores**:
 - Sofia Castellani (Principal Solution Architect)
@@ -26,7 +27,7 @@ O PRD define 3 fases de produto. Este roadmap decompoe essas fases em **10 miles
 
 ```
 PRD Fase 1 (STT Batch)          PRD Fase 2 (Streaming)          PRD Fase 3 (Telefonia)
-├── M1: Fundacao                ├── M5: WebSocket + VAD         ├── M8: RTP Listener
+├── M1: Fundacao ✅             ├── M5: WebSocket + VAD         ├── M8: RTP Listener
 ├── M2: Worker gRPC             ├── M6: Session Manager         ├── M9: Scheduler Avancado
 ├── M3: API Batch               ├── M7: Segundo Backend         └── M10: Full-Duplex
 └── M4: Pipelines
@@ -83,10 +84,11 @@ Cada tema representa um eixo de valor que atravessa multiplos milestones.
 
 ---
 
-### M1 -- Fundacao do Projeto
+### M1 -- Fundacao do Projeto ✅
 
 **Tema**: T1 -- Fundacao do Runtime
 **Esforco**: P (1-2 semanas)
+**Status**: **Concluido** (2026-02-07)
 **Dependencias**: Nenhuma (ponto de partida)
 
 **Descricao**: Estabelecer a estrutura do projeto Python, tooling de desenvolvimento, CI basico, e os tipos/interfaces fundamentais que todos os milestones subsequentes usam. Nenhum componente funcional completo -- apenas os alicerces.
@@ -112,6 +114,8 @@ python -m ruff check src/
 python -m mypy src/
 python -m pytest tests/unit/
 ```
+
+**Resultado**: Todos os criterios atingidos. 56 testes unitarios, mypy strict sem erros, ruff limpo. CI (GitHub Actions) e CD (release via tag) configurados. Pipeline de CD com build de wheel, verificacao de conteudo e consistencia de versao.
 
 **Riscos**:
 | Risco | Probabilidade | Impacto | Mitigacao |
@@ -597,7 +601,7 @@ Validacao:
 ## 4. Grafo de Dependencias
 
 ```
-M1 (Fundacao)
+M1 (Fundacao) ✅
 ├──► M2 (Worker gRPC)
 │    ├──► M3 (API Batch + CLI)
 │    │    ├──► M4 (Pipelines)
@@ -641,7 +645,7 @@ O caminho critico principal vai de M1 a M7 (entrega completa de STT model-agnost
 
 | Milestone | Esforco | Acumulado |
 |-----------|---------|-----------|
-| M1 -- Fundacao | P (1-2 sem) | 1-2 sem |
+| M1 -- Fundacao ✅ | P (1-2 sem) | 1-2 sem |
 | M2 -- Worker gRPC | M (2-4 sem) | 3-6 sem |
 | M3 -- API Batch | M (2-4 sem) | 5-10 sem |
 | M4 -- Pipelines | M (2-4 sem) | 7-14 sem |
