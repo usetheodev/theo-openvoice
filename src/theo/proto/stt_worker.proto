@@ -68,12 +68,14 @@ message Segment {
   string text = 4;
   float avg_logprob = 5;
   float no_speech_prob = 6;
+  float compression_ratio = 7;
 }
 
 message Word {
   string word = 1;
   float start = 2;
   float end = 3;
+  float probability = 4;
 }
 
 // --- Cancelamento ---

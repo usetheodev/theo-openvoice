@@ -22,7 +22,12 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install dependencies
-        run: pip install -e ".[dev]"
+        run: pip install -e ".[dev,grpc]"
+
+      - name: Verify proto stubs are up-to-date
+        run: |
+          bash scripts/generate_proto.sh
+          git diff --exit-code src/theo/proto/
 
       - name: Lint (ruff check)
         run: python -m ruff check src/ tests/

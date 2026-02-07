@@ -24,6 +24,8 @@ classifiers = [
 dependencies = [
     "pydantic>=2.6,<3.0",
     "pyyaml>=6.0,<7.0",
+    "structlog>=24.0,<26.0",
+    "numpy>=1.26,<3.0",
 ]
 
 [project.optional-dependencies]
@@ -50,6 +52,7 @@ dev = [
     "grpcio-tools>=1.68,<2.0",
     "types-PyYAML>=6.0",
     "types-protobuf>=5.29",
+    "types-grpcio>=1.0",
 ]
 all = [
     "theo-openvoice[server,grpc,faster-whisper,itn,dev]",
@@ -62,6 +65,7 @@ packages = ["src/theo"]
 target-version = "py311"
 line-length = 99
 src = ["src"]
+extend-exclude = ["src/theo/proto/stt_worker_pb2*.py"]
 
 [tool.ruff.lint]
 select = [
@@ -98,12 +102,17 @@ mypy_path = "src"
 module = "theo.proto.*"
 ignore_errors = true
 
+[[tool.mypy.overrides]]
+module = "faster_whisper.*"
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
 filterwarnings = [
     "error",
     "ignore::DeprecationWarning:google.protobuf.*",
+    "ignore::DeprecationWarning:grpc.*",
 ]
 markers = [
     "integration: testes que requerem modelo instalado",

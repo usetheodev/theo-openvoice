@@ -82,6 +82,7 @@ class WordTimestamp:
     word: str
     start: float
     end: float
+    probability: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,6 +112,7 @@ class SegmentDetail:
     text: str
     avg_logprob: float = 0.0
     no_speech_prob: float = 0.0
+    compression_ratio: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
