@@ -28,7 +28,7 @@ O PRD define 3 fases de produto. Este roadmap decompoe essas fases em **10 miles
 ```
 PRD Fase 1 (STT Batch)          PRD Fase 2 (Streaming)          PRD Fase 3 (Telefonia)
 ├── M1: Fundacao ✅             ├── M5: WebSocket + VAD         ├── M8: RTP Listener
-├── M2: Worker gRPC             ├── M6: Session Manager         ├── M9: Scheduler Avancado
+├── M2: Worker gRPC ✅          ├── M6: Session Manager         ├── M9: Scheduler Avancado
 ├── M3: API Batch               ├── M7: Segundo Backend         └── M10: Full-Duplex
 └── M4: Pipelines
 ```
@@ -128,10 +128,11 @@ python -m pytest tests/unit/
 
 ---
 
-### M2 -- Worker gRPC (Faster-Whisper)
+### M2 -- Worker gRPC (Faster-Whisper) ✅
 
 **Tema**: T2 -- Transcricao Batch
 **Esforco**: M (2-4 semanas)
+**Status**: **Concluido** (2026-02-07)
 **Dependencias**: M1 (tipos base, protobufs definidos)
 
 **Descricao**: Implementar o worker STT como subprocess gRPC usando Faster-Whisper como engine de inferencia. Inclui o Worker Manager que gerencia lifecycle de subprocessos. Este e o milestone mais critico do Tema T2 -- o worker e o componente que interage com GPU e engines externas.
@@ -157,6 +158,8 @@ python -m theo.workers.stt.main --port 50051
 grpcurl -plaintext localhost:50051 theo.STTWorker/Health
 # -> {"status": "ok", "model": "faster-whisper-tiny"}
 ```
+
+**Resultado**: Todos os criterios atingidos. Proto compilado com script `scripts/generate_proto.sh` e stubs commitados. Worker STT como subprocess gRPC com `STTWorkerServicer` (TranscribeFile, Health, stubs UNIMPLEMENTED para streaming). `FasterWhisperBackend` implementando `STTBackend` com transcricao batch, hot words via initial_prompt e conversao PCM->numpy. `WorkerManager` com spawn, health probe com backoff exponencial, crash detection, auto-restart com rate limiting e shutdown graceful. Structured logging via structlog (JSON + console). Conversores puros proto<->Theo. 127 testes unitarios (71 novos: converters, servicer, backend, manager, logging, integracao). Code review com 7 fixes aplicados (CR1-CR7): return defensivo apos abort, extracao DRY de `_build_worker_cmd`/`_spawn_worker_process`, import fora de try, guard de duplo shutdown, cancel+await de background tasks, DEVNULL em subprocess, fix de self-cancellation em restart. CI com verificacao de freshness dos stubs proto.
 
 **Riscos**:
 | Risco | Probabilidade | Impacto | Mitigacao |
@@ -602,7 +605,7 @@ Validacao:
 
 ```
 M1 (Fundacao) ✅
-├──► M2 (Worker gRPC)
+├──► M2 (Worker gRPC) ✅
 │    ├──► M3 (API Batch + CLI)
 │    │    ├──► M4 (Pipelines)
 │    │    │    ├──► M5 (WebSocket + VAD)
@@ -646,7 +649,7 @@ O caminho critico principal vai de M1 a M7 (entrega completa de STT model-agnost
 | Milestone | Esforco | Acumulado |
 |-----------|---------|-----------|
 | M1 -- Fundacao ✅ | P (1-2 sem) | 1-2 sem |
-| M2 -- Worker gRPC | M (2-4 sem) | 3-6 sem |
+| M2 -- Worker gRPC ✅ | M (2-4 sem) | 3-6 sem |
 | M3 -- API Batch | M (2-4 sem) | 5-10 sem |
 | M4 -- Pipelines | M (2-4 sem) | 7-14 sem |
 | M5 -- WebSocket + VAD | G (4-6 sem) | 11-20 sem |
