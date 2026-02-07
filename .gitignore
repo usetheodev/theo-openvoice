@@ -15,6 +15,17 @@ build/
 .venv/
 venv/
 *.egg
+*.whl
+
+# Tooling caches
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# Coverage
+.coverage
+.coverage.*
+htmlcov/
 
 # IDE
 .vscode/
@@ -34,3 +45,6 @@ Thumbs.db
 src/theo/proto/*_pb2.py
 src/theo/proto/*_pb2_grpc.py
 src/theo/proto/*_pb2.pyi
+
+# Models (downloaded via theo pull)
+models/
