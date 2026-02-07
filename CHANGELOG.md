@@ -19,3 +19,6 @@ e este projeto adere ao [Versionamento Semantico](https://semver.org/lang/pt-BR/
 - Configuracoes de preprocessing e postprocessing com defaults (#M1-I6)
 - Fixtures de teste: audio WAV (16kHz, 8kHz, 44.1kHz) e manifestos YAML (#M1-AUX)
 - 56 testes unitarios cobrindo tipos, exceptions, manifesto, configs e contrato STTBackend (#M1-AUX)
+- Pipeline de CD: workflow de release via tag `v*` com build de wheel e GitHub Release (#CD-01)
+- Build validation no CI: verificacao de conteudo do wheel e consistencia de versao (#CD-02)
+- Documentacao de CD pipeline com ADR-011 e estrategia de versionamento (#CD-03)
