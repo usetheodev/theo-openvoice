@@ -4,9 +4,40 @@ Runtime unificado de voz (STT + TTS) com API compativel com OpenAI, construido d
 
 ## Status
 
-**Em fase de design.** Nenhum codigo implementado ainda.
+**M1 (Fundacao) completo.** Tipos, interfaces, configs, exceptions, protobuf e testes unitarios implementados.
 
 O PRD completo (v2.1) esta disponivel em [`docs/PRD.md`](docs/PRD.md).
+
+## Instalacao
+
+Requer Python 3.11+.
+
+```bash
+# Apenas o core (tipos, configs, parsing de manifesto)
+pip install -e .
+
+# Para desenvolvimento (lint, typecheck, testes)
+pip install -e ".[dev]"
+
+# Todos os extras (server, gRPC, engines, dev)
+pip install -e ".[all]"
+```
+
+## Desenvolvimento
+
+```bash
+# Lint
+python -m ruff check src/ tests/
+
+# Format
+python -m ruff format src/ tests/
+
+# Type check
+python -m mypy src/
+
+# Testes unitarios
+python -m pytest tests/unit/ -v
+```
 
 ## Visao
 
@@ -36,7 +67,8 @@ CLI / API Server (FastAPI)
 
 ## Roadmap
 
-- **Fase 1** — STT Batch + Preprocessing (em planejamento)
+- **M1** — Fundacao (completo)
+- **Fase 1** — STT Batch + Preprocessing
 - **Fase 2** — Streaming Real + Session Manager
 - **Fase 3** — Telefonia + Scheduler Avancado
 

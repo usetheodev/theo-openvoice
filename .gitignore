@@ -14,6 +14,7 @@ dist/
 build/
 .venv/
 venv/
+*.egg
 
 # IDE
 .vscode/
@@ -28,3 +29,8 @@ Thumbs.db
 # Environment
 .env
 .env.*
+
+# gRPC generated
+src/theo/proto/*_pb2.py
+src/theo/proto/*_pb2_grpc.py
+src/theo/proto/*_pb2.pyi
