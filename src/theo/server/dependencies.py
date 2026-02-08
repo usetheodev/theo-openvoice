@@ -7,8 +7,20 @@ from typing import TYPE_CHECKING
 from fastapi import Request  # noqa: TC002
 
 if TYPE_CHECKING:
+    from theo.postprocessing.pipeline import PostProcessingPipeline
+    from theo.preprocessing.pipeline import AudioPreprocessingPipeline
     from theo.registry.registry import ModelRegistry
     from theo.scheduler.scheduler import Scheduler
+
+
+def get_preprocessing_pipeline(request: Request) -> AudioPreprocessingPipeline | None:
+    """Retorna o AudioPreprocessingPipeline do app state, ou None se nao configurado."""
+    return request.app.state.preprocessing_pipeline  # type: ignore[no-any-return]
+
+
+def get_postprocessing_pipeline(request: Request) -> PostProcessingPipeline | None:
+    """Retorna o PostProcessingPipeline do app state, ou None se nao configurado."""
+    return request.app.state.postprocessing_pipeline  # type: ignore[no-any-return]
 
 
 def get_registry(request: Request) -> ModelRegistry:

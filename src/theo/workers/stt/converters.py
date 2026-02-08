@@ -16,7 +16,7 @@ from theo.proto import (
 
 if TYPE_CHECKING:
     from theo._types import BatchResult, SegmentDetail, WordTimestamp
-    from theo.proto.stt_worker_pb2 import TranscribeFileRequest  # type: ignore[attr-defined]
+    from theo.proto.stt_worker_pb2 import TranscribeFileRequest
 
 
 def proto_request_to_transcribe_params(

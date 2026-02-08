@@ -108,22 +108,59 @@ async def _serve(host: str, port: int, models_dir: str) -> None:
         stt_workers=len(stt_models),
     )
 
+    # 2.5 Build pipelines
+    from theo.config.postprocessing import PostProcessingConfig
+    from theo.config.preprocessing import PreprocessingConfig
+    from theo.postprocessing.itn import ITNStage
+    from theo.postprocessing.pipeline import PostProcessingPipeline
+    from theo.postprocessing.stages import TextStage  # noqa: TC001
+    from theo.preprocessing.dc_remove import DCRemoveStage
+    from theo.preprocessing.gain_normalize import GainNormalizeStage
+    from theo.preprocessing.pipeline import AudioPreprocessingPipeline
+    from theo.preprocessing.resample import ResampleStage
+    from theo.preprocessing.stages import AudioStage  # noqa: TC001
+
+    pre_config = PreprocessingConfig()
+    pre_stages: list[AudioStage] = []
+    if pre_config.resample:
+        pre_stages.append(ResampleStage(pre_config.target_sample_rate))
+    if pre_config.dc_remove:
+        pre_stages.append(DCRemoveStage(pre_config.dc_remove_cutoff_hz))
+    if pre_config.gain_normalize:
+        pre_stages.append(GainNormalizeStage(pre_config.target_dbfs))
+    preprocessing_pipeline = AudioPreprocessingPipeline(pre_config, pre_stages)
+
+    post_config = PostProcessingConfig()
+    post_stages: list[TextStage] = []
+    if post_config.itn.enabled:
+        post_stages.append(ITNStage(post_config.itn.language))
+    postprocessing_pipeline = PostProcessingPipeline(post_config, post_stages)
+
+    logger.info(
+        "pipelines_configured",
+        preprocessing_stages=[s.name for s in pre_stages],
+        postprocessing_stages=[s.name for s in post_stages],
+    )
+
     # 3. Create app
     scheduler = Scheduler(worker_manager, registry)
-    app = create_app(registry=registry, scheduler=scheduler)
+    app = create_app(
+        registry=registry,
+        scheduler=scheduler,
+        preprocessing_pipeline=preprocessing_pipeline,
+        postprocessing_pipeline=postprocessing_pipeline,
+    )
 
     # 4. Setup shutdown
     shutdown_event = asyncio.Event()
     loop = asyncio.get_running_loop()
 
+    def _handle_signal(s: signal.Signals) -> None:
+        logger.info("shutdown_signal", signal=s.name)
+        shutdown_event.set()
+
     for sig in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(
-            sig,
-            lambda s=sig: (
-                logger.info("shutdown_signal", signal=signal.Signals(s).name),
-                shutdown_event.set(),
-            ),
-        )
+        loop.add_signal_handler(sig, _handle_signal, sig)
 
     # 5. Run uvicorn
     config = uvicorn.Config(app, host=host, port=port, log_level="warning")

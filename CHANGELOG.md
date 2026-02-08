@@ -8,6 +8,30 @@ e este projeto adere ao [Versionamento Semantico](https://semver.org/lang/pt-BR/
 ## [Unreleased]
 
 ### Added
+- Property `name` na interface `TextStage` ABC para identificacao de stages no post-processing, simetrica com `AudioStage` (#M4-CR-F03)
+- Logging por stage no `PostProcessingPipeline.process()` equivalente ao preprocessing pipeline (#M4-CR-F03)
+- Re-exports de `AudioPreprocessingPipeline` e `AudioStage` no `theo.preprocessing.__init__` via `__all__` (#M4-CR-F06)
+- Script `scripts/demo_m4.sh` para demo end-to-end da Fase 1: preprocessing + post-processing + API + CLI (#M4-DEMO)
+
+### Fixed
+- `theo serve` agora instancia pipelines de preprocessing e postprocessing com config toggles antes de criar a app — sem esse fix os pipelines ficavam `None` em producao (#M4-CR-F01)
+
+### Added
+- Interface abstrata `AudioStage` ABC para stages plugaveis do Audio Preprocessing Pipeline (#M4-E1-T1)
+- Funcoes `decode_audio()` e `encode_pcm16()` para conversao entre bytes de audio e arrays numpy float32 (#M4-E1-T1)
+- `AudioPreprocessingPipeline` que orquestra stages em sequencia: decode -> stages -> encode PCM16 WAV (#M4-E1-T1)
+- 26 testes unitarios cobrindo AudioStage ABC, decode/encode de audio e pipeline de preprocessamento (#M4-E1-T1)
+- `ResampleStage` para conversao de qualquer sample rate para 16kHz via `scipy.signal.resample_poly` (#M4-E1-T2)
+- `DCRemoveStage` com filtro Butterworth HPF 2a ordem a 20Hz para remocao de DC offset (#M4-E1-T3)
+- `GainNormalizeStage` com peak normalization para -3dBFS e protecao contra clipping (#M4-E1-T4)
+- Integracao do Audio Preprocessing Pipeline no fluxo batch: audio preprocessado automaticamente antes do worker (#M4-E1-T5)
+- Interface abstrata `TextStage` ABC para stages plugaveis do Post-Processing Pipeline (#M4-E2-T1)
+- `PostProcessingPipeline` que orquestra stages de texto em sequencia com suporte a `BatchResult` imutavel (#M4-E2-T1)
+- `ITNStage` para Inverse Text Normalization via `nemo_text_processing` com fallback graceful quando pacote nao instalado (#M4-E2-T2)
+- Integracao do Post-Processing Pipeline no fluxo batch: texto formatado automaticamente apos transcricao (#M4-E2-T3)
+- Parametro `itn` nos endpoints REST `/v1/audio/transcriptions` e `/v1/audio/translations` para controle de ITN por request (#M4-E3-T1)
+- Flag `--no-itn` nos comandos CLI `theo transcribe` e `theo translate` para desabilitar ITN (#M4-E3-T1)
+- Testes end-to-end validando pipeline completo: audio em qualquer sample rate -> preprocessing -> transcricao -> post-processing -> resposta formatada (#M4-E3-T2)
 - FastAPI application factory `create_app()` com injecao de dependencias via Registry e Scheduler (#M3-E1)
 - Endpoint `GET /health` retornando status e versao do runtime (#M3-E1)
 - Endpoint `POST /v1/audio/transcriptions` compativel com contrato OpenAI Audio API (#M3-E3)

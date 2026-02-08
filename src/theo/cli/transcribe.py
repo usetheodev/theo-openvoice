@@ -19,6 +19,7 @@ def _post_audio(
     model: str,
     response_format: str,
     language: str | None,
+    itn: bool = True,
 ) -> None:
     """Envia audio para o server via HTTP e imprime resultado."""
     import httpx
@@ -32,6 +33,8 @@ def _post_audio(
     data: dict[str, str] = {"model": model, "response_format": response_format}
     if language:
         data["language"] = language
+    if not itn:
+        data["itn"] = "false"
 
     try:
         with file_path.open("rb") as f:
@@ -84,6 +87,12 @@ def _post_audio(
 )
 @click.option("--language", "-l", default=None, help="Codigo ISO 639-1 do idioma.")
 @click.option(
+    "--no-itn",
+    is_flag=True,
+    default=False,
+    help="Desabilita Inverse Text Normalization.",
+)
+@click.option(
     "--server",
     default=DEFAULT_SERVER_URL,
     show_default=True,
@@ -94,6 +103,7 @@ def transcribe(
     model: str,
     response_format: str,
     language: str | None,
+    no_itn: bool,
     server: str,
 ) -> None:
     """Transcreve um arquivo de audio."""
@@ -104,6 +114,7 @@ def transcribe(
         model=model,
         response_format=response_format,
         language=language,
+        itn=not no_itn,
     )
 
 
@@ -119,6 +130,12 @@ def transcribe(
     help="Formato de resposta.",
 )
 @click.option(
+    "--no-itn",
+    is_flag=True,
+    default=False,
+    help="Desabilita Inverse Text Normalization.",
+)
+@click.option(
     "--server",
     default=DEFAULT_SERVER_URL,
     show_default=True,
@@ -128,6 +145,7 @@ def translate(
     file: str,
     model: str,
     response_format: str,
+    no_itn: bool,
     server: str,
 ) -> None:
     """Traduz um arquivo de audio para ingles."""
@@ -138,4 +156,5 @@ def translate(
         model=model,
         response_format=response_format,
         language=None,
+        itn=not no_itn,
     )

@@ -4,7 +4,7 @@
 **Base**: PRD v2.1, ARCHITECTURE.md v1.0
 **Status**: Em execucao
 **Data**: 2026-02-07
-**Ultima atualizacao**: 2026-02-07
+**Ultima atualizacao**: 2026-02-08
 
 **Autores**:
 - Sofia Castellani (Principal Solution Architect)
@@ -26,11 +26,11 @@ Este documento define a sequencia de implementacao do Theo OpenVoice, organizada
 O PRD define 3 fases de produto. Este roadmap decompoe essas fases em **10 milestones** com granularidade executavel. As fases do PRD sao mantidas como agrupamento logico, mas a unidade de planejamento e o milestone.
 
 ```
-PRD Fase 1 (STT Batch)          PRD Fase 2 (Streaming)          PRD Fase 3 (Telefonia)
+PRD Fase 1 (STT Batch) ✅       PRD Fase 2 (Streaming)          PRD Fase 3 (Telefonia)
 ├── M1: Fundacao ✅             ├── M5: WebSocket + VAD         ├── M8: RTP Listener
 ├── M2: Worker gRPC ✅          ├── M6: Session Manager         ├── M9: Scheduler Avancado
 ├── M3: API Batch ✅            ├── M7: Segundo Backend         └── M10: Full-Duplex
-└── M4: Pipelines
+└── M4: Pipelines ✅
 ```
 
 ---
@@ -222,10 +222,11 @@ curl -F file=@audio.wav -F model=faster-whisper-tiny \
 
 ---
 
-### M4 -- Pipelines de Audio (Preprocessing + Post-Processing)
+### M4 -- Pipelines de Audio (Preprocessing + Post-Processing) ✅
 
 **Tema**: T2 -- Transcricao Batch
 **Esforco**: M (2-4 semanas)
+**Status**: **Concluido** (2026-02-08)
 **Dependencias**: M3 (API funcional para testar pipelines end-to-end)
 
 **Descricao**: Implementar os pipelines de preprocessing e post-processing que transformam audio bruto em PCM normalizado e texto cru em texto formatado. Este milestone completa o Tema T2 -- apos ele, a Fase 1 do PRD esta entregue.
@@ -264,6 +265,8 @@ curl -F file=@audio_44khz.wav -F model=faster-whisper-tiny \
 | ITN introduz erros em edge cases (ex: "um" -> "1" quando e artigo) | Media | Medio | Testes extensivos com corpus pt-BR; flag `--no-itn` no CLI e `itn: false` na API |
 | Denoise (RNNoise) tem binding Python instavel em algumas plataformas | Media | Baixo | Denoise e desativado por default; fallback graceful se binding falhar |
 
+**Resultado**: Todos os criterios atingidos. 10/10 tasks do STRATEGIC_M4.md completas. Audio Preprocessing Pipeline com 3 stages (Resample via `scipy.signal.resample_poly`, DC Remove via Butterworth HPF 20Hz, Gain Normalize para -3dBFS peak). Post-Processing Pipeline com ITN stage via `nemo_text_processing` (fail-open: se nao instalado, retorna texto original com warning). Ambos pipelines integrados no fluxo batch via `app.state` e FastAPI `Depends()`. Controle de ITN via campo `itn` na API REST (default `true`) e flag `--no-itn` no CLI. `soundfile` para decode de WAV/FLAC/OGG com fallback `wave` (stdlib). Interfaces `AudioStage` e `TextStage` projetadas para composabilidade e extensibilidade futura (Denoise em M8, Entity Formatting e Hot Word Correction em M6). 132 testes novos (total: 400 testes). Makefile para dev workflow (`make check`, `make test`, `make ci`). mypy strict sem erros (inclusive fix de 5 erros pre-existentes em converters.py, servicer.py, serve.py). ruff limpo. `scipy-stubs` adicionado para type checking completo.
+
 **Perspectiva Sofia (Arquitetura)**: Cada stage deve seguir a mesma interface (`process(audio) -> audio` para pre, `process(text) -> text` para pos). Isso garante composabilidade e facilita adicionar stages futuros sem mudar o orquestrador. KISS -- nao over-engineer o pipeline pattern.
 
 **Perspectiva Viktor (Real-Time)**: O preprocessing deve ser projetado para operar em streaming (frame-by-frame) desde o inicio, mesmo que M4 so use em batch. Se implementar apenas para arquivo completo, vai precisar reescrever em M5. Custo de fazer certo agora: zero. Custo de refatorar depois: semanas.
@@ -272,9 +275,9 @@ curl -F file=@audio_44khz.wav -F model=faster-whisper-tiny \
 
 ---
 
-### CHECKPOINT: Fase 1 Completa
+### CHECKPOINT: Fase 1 Completa ✅
 
-Apos M4, a Fase 1 do PRD esta entregue:
+A Fase 1 do PRD esta 100% entregue (2026-02-08):
 
 ```
 Validacao:
@@ -286,9 +289,11 @@ Validacao:
   [x] Worker Faster-Whisper isolado como subprocess gRPC
   [x] Metricas Prometheus basicas
   [x] CI funcionando (lint, typecheck, testes)
+  [x] 400 testes unitarios, mypy strict, ruff limpo
+  [x] Makefile com targets: format, lint, typecheck, test, ci
 ```
 
-**O que um usuario pode fazer**: Transcrever qualquer arquivo de audio com qualidade de producao, via REST API compativel com OpenAI ou via CLI.
+**O que um usuario pode fazer**: Transcrever qualquer arquivo de audio com qualidade de producao, via REST API compativel com OpenAI ou via CLI. Audio de qualquer sample rate e normalizado automaticamente. Numeros e entidades formatados via ITN (desabilitavel via `itn=false` ou `--no-itn`).
 
 ---
 
@@ -610,7 +615,7 @@ Validacao:
 M1 (Fundacao) ✅
 ├──► M2 (Worker gRPC) ✅
 │    ├──► M3 (API Batch + CLI) ✅
-│    │    ├──► M4 (Pipelines)
+│    │    ├──► M4 (Pipelines) ✅
 │    │    │    ├──► M5 (WebSocket + VAD)
 │    │    │    │    ├──► M6 (Session Manager)
 │    │    │    │    │    ├──► M7 (Segundo Backend)
@@ -654,7 +659,7 @@ O caminho critico principal vai de M1 a M7 (entrega completa de STT model-agnost
 | M1 -- Fundacao ✅ | P (1-2 sem) | 1-2 sem |
 | M2 -- Worker gRPC ✅ | M (2-4 sem) | 3-6 sem |
 | M3 -- API Batch ✅ | M (2-4 sem) | 5-10 sem |
-| M4 -- Pipelines | M (2-4 sem) | 7-14 sem |
+| M4 -- Pipelines ✅ | M (2-4 sem) | 7-14 sem |
 | M5 -- WebSocket + VAD | G (4-6 sem) | 11-20 sem |
 | M6 -- Session Manager | G (4-6 sem) | 15-26 sem |
 | M7 -- Segundo Backend | M (2-4 sem) | 17-30 sem |

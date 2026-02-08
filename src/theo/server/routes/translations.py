@@ -6,8 +6,14 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Form, UploadFile
 
+from theo.postprocessing.pipeline import PostProcessingPipeline  # noqa: TC001
+from theo.preprocessing.pipeline import AudioPreprocessingPipeline  # noqa: TC001
 from theo.scheduler.scheduler import Scheduler  # noqa: TC001
-from theo.server.dependencies import get_scheduler
+from theo.server.dependencies import (
+    get_postprocessing_pipeline,
+    get_preprocessing_pipeline,
+    get_scheduler,
+)
 from theo.server.routes._common import handle_audio_request
 
 router = APIRouter()
@@ -21,7 +27,12 @@ async def create_translation(
     prompt: str | None = Form(default=None),
     response_format: str = Form(default="json"),
     temperature: float = Form(default=0.0),
+    itn: bool = Form(default=True),
     scheduler: Scheduler = Depends(get_scheduler),  # noqa: B008
+    preprocessing_pipeline: AudioPreprocessingPipeline | None = Depends(  # noqa: B008
+        get_preprocessing_pipeline
+    ),
+    postprocessing_pipeline: PostProcessingPipeline | None = Depends(get_postprocessing_pipeline),  # noqa: B008
 ) -> Any:
     """Traduz audio para ingles.
 
@@ -36,4 +47,7 @@ async def create_translation(
         temperature=temperature,
         task="translate",
         scheduler=scheduler,
+        preprocessing_pipeline=preprocessing_pipeline,
+        postprocessing_pipeline=postprocessing_pipeline,
+        itn=itn,
     )

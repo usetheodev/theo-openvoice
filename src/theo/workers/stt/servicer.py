@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 import grpc
 
 from theo.logging import get_logger
-from theo.proto.stt_worker_pb2 import (  # type: ignore[attr-defined]
+from theo.proto.stt_worker_pb2 import (
     TranscribeFileResponse,
 )
 from theo.workers.stt.converters import (
@@ -21,7 +21,7 @@ from theo.workers.stt.converters import (
 )
 
 if TYPE_CHECKING:
-    from theo.proto.stt_worker_pb2 import (  # type: ignore[attr-defined]
+    from theo.proto.stt_worker_pb2 import (
         CancelRequest,
         CancelResponse,
         HealthRequest,

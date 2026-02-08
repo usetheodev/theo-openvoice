@@ -253,5 +253,7 @@ class TestEmptySegments:
         body = response.body.decode()
         lines = body.split("\n")
         # After WEBVTT header + blank line, only one cue block
-        text_lines = [line for line in lines if line.strip() and line != "WEBVTT" and "-->" not in line]
+        text_lines = [
+            line for line in lines if line.strip() and line != "WEBVTT" and "-->" not in line
+        ]
         assert text_lines == ["Teste"]

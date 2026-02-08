@@ -15,6 +15,8 @@ from theo.server.formatters import format_response
 from theo.server.models.requests import TranscribeRequest
 
 if TYPE_CHECKING:
+    from theo.postprocessing.pipeline import PostProcessingPipeline
+    from theo.preprocessing.pipeline import AudioPreprocessingPipeline
     from theo.scheduler.scheduler import Scheduler
 
 logger = get_logger("server.routes")
@@ -30,10 +32,14 @@ async def handle_audio_request(
     temperature: float,
     task: str,
     scheduler: Scheduler,
+    preprocessing_pipeline: AudioPreprocessingPipeline | None = None,
+    postprocessing_pipeline: PostProcessingPipeline | None = None,
+    itn: bool = True,
 ) -> Any:
     """Processa request de audio (transcricao ou traducao).
 
-    Valida input, le audio, envia ao scheduler, formata resposta.
+    Valida input, le audio, aplica preprocessing, envia ao scheduler,
+    aplica post-processing, formata resposta.
 
     Args:
         file: Arquivo de audio enviado pelo cliente.
@@ -44,6 +50,9 @@ async def handle_audio_request(
         temperature: Temperatura de sampling.
         task: "transcribe" ou "translate".
         scheduler: Scheduler para rotear ao worker.
+        preprocessing_pipeline: Pipeline de preprocessamento de audio (opcional).
+        postprocessing_pipeline: Pipeline de pos-processamento de texto (opcional).
+        itn: Se True (default), aplica post-processing ao resultado.
 
     Returns:
         Response formatada conforme response_format.
@@ -84,6 +93,10 @@ async def handle_audio_request(
     if len(audio_data) > MAX_FILE_SIZE_BYTES:
         raise AudioTooLargeError(len(audio_data), MAX_FILE_SIZE_BYTES)
 
+    # Aplicar preprocessing se pipeline configurado
+    if preprocessing_pipeline is not None:
+        audio_data = preprocessing_pipeline.process(audio_data)
+
     request = TranscribeRequest(
         request_id=request_id,
         model_name=model,
@@ -96,5 +109,9 @@ async def handle_audio_request(
     )
 
     result = await scheduler.transcribe(request)
+
+    # Aplicar post-processing se pipeline configurado e ITN habilitado
+    if postprocessing_pipeline is not None and itn:
+        result = postprocessing_pipeline.process_result(result)
 
     return format_response(result, fmt, task=task)
