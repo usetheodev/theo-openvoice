@@ -11,6 +11,7 @@ Responsabilidades:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import subprocess
 import sys
 import time
@@ -226,10 +227,15 @@ class WorkerManager:
                     WorkerState.STOPPING,
                     WorkerState.STOPPED,
                 ):
+                    stderr_output = ""
+                    if process.stderr is not None:
+                        with contextlib.suppress(Exception):
+                            stderr_output = process.stderr.read().decode(errors="replace")[-2000:]
                     logger.error(
                         "worker_crashed",
                         worker_id=worker_id,
                         exit_code=exit_code,
+                        stderr=stderr_output or "(empty)",
                     )
                     handle.state = WorkerState.CRASHED
                     await self._attempt_restart(worker_id)
@@ -357,7 +363,7 @@ def _spawn_worker_process(
     return subprocess.Popen(
         cmd,
         stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
     )
 
 

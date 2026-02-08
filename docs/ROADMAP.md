@@ -29,7 +29,7 @@ O PRD define 3 fases de produto. Este roadmap decompoe essas fases em **10 miles
 PRD Fase 1 (STT Batch)          PRD Fase 2 (Streaming)          PRD Fase 3 (Telefonia)
 ├── M1: Fundacao ✅             ├── M5: WebSocket + VAD         ├── M8: RTP Listener
 ├── M2: Worker gRPC ✅          ├── M6: Session Manager         ├── M9: Scheduler Avancado
-├── M3: API Batch               ├── M7: Segundo Backend         └── M10: Full-Duplex
+├── M3: API Batch ✅            ├── M7: Segundo Backend         └── M10: Full-Duplex
 └── M4: Pipelines
 ```
 
@@ -174,10 +174,11 @@ grpcurl -plaintext localhost:50051 theo.STTWorker/Health
 
 ---
 
-### M3 -- API Batch (REST + CLI)
+### M3 -- API Batch (REST + CLI) ✅
 
 **Tema**: T2 -- Transcricao Batch
 **Esforco**: M (2-4 semanas)
+**Status**: **Concluido** (2026-02-07)
 **Dependencias**: M2 (worker gRPC funcional)
 
 **Descricao**: Expor a API REST compativel com OpenAI e os comandos CLI para transcricao de arquivo. Este milestone conecta o usuario ao runtime -- e a primeira entrega usavel por alguem externo ao time.
@@ -212,6 +213,8 @@ curl -F file=@audio.wav -F model=faster-whisper-tiny \
 | Incompatibilidade sutil com contrato OpenAI (campos, tipos, defaults) | Media | Medio | Testar com SDK oficial `openai` Python como cliente |
 | Cold start lento (modelo carregando na primeira request) | Alta | Medio | Retornar 503 com header `Retry-After` durante loading; documentar `theo serve --preload` |
 | Upload de arquivos grandes consome memoria | Baixa | Baixo | Limite de 25MB configuravel; streaming de upload via `UploadFile` do FastAPI |
+
+**Resultado**: Todos os criterios atingidos. 13/13 tasks do STRATEGIC_M3.md completas. FastAPI app com `create_app()` factory e injecao de dependencias via `app.state`. Endpoints `POST /v1/audio/transcriptions` e `POST /v1/audio/translations` compativeis com contrato OpenAI. `GET /health` com status e versao. `ModelRegistry` para scan de modelos em disco com resolucao por nome. `Scheduler` basico roteando requests para workers via gRPC com conversores proto<->dominio. Formatos de resposta: json, verbose_json, text, srt, vtt com formatters dedicados. Error handlers HTTP (400, 404, 413, 503, 500) com formato OpenAI-compatible e `InvalidRequestError` para parametros invalidos. CLI: `theo serve`, `theo transcribe`, `theo translate`, `theo list`, `theo inspect` via Click. Pydantic models para request/response com validacao. 275 testes (219 novos: e2e batch, SDK compat, CLI, routes, formatters, error handling, registry, scheduler, models). Validado com SDK `openai` Python como cliente real contra servidor Theo. Code review pos-implementacao com 3 fixes aplicados: (CR1) validacao de `response_format` invalido retorna 400 em vez de 500, (CR2) pre-check de `file.size` via Content-Length antes de `await file.read()`, (CR3) carry correto de milissegundos em timestamps SRT/VTT via `divmod`. mypy strict sem erros, ruff limpo, CI verde.
 
 **Perspectiva Viktor (Real-Time)**: O Scheduler nesta fase e trivial (round-robin de 1 worker), mas a interface deve ser definida para suportar priorizacao futura. Nao fazer God class -- o Scheduler de M3 deve ser substituivel pelo de M9 sem mudar API Server.
 
@@ -606,7 +609,7 @@ Validacao:
 ```
 M1 (Fundacao) ✅
 ├──► M2 (Worker gRPC) ✅
-│    ├──► M3 (API Batch + CLI)
+│    ├──► M3 (API Batch + CLI) ✅
 │    │    ├──► M4 (Pipelines)
 │    │    │    ├──► M5 (WebSocket + VAD)
 │    │    │    │    ├──► M6 (Session Manager)
@@ -650,7 +653,7 @@ O caminho critico principal vai de M1 a M7 (entrega completa de STT model-agnost
 |-----------|---------|-----------|
 | M1 -- Fundacao ✅ | P (1-2 sem) | 1-2 sem |
 | M2 -- Worker gRPC ✅ | M (2-4 sem) | 3-6 sem |
-| M3 -- API Batch | M (2-4 sem) | 5-10 sem |
+| M3 -- API Batch ✅ | M (2-4 sem) | 5-10 sem |
 | M4 -- Pipelines | M (2-4 sem) | 7-14 sem |
 | M5 -- WebSocket + VAD | G (4-6 sem) | 11-20 sem |
 | M6 -- Session Manager | G (4-6 sem) | 15-26 sem |

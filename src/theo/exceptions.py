@@ -16,8 +16,9 @@ Hierarquia:
     |   +-- AudioFormatError
     |   +-- AudioTooLargeError
     +-- SessionError
-        +-- SessionNotFoundError
-        +-- SessionClosedError
+    |   +-- SessionNotFoundError
+    |   +-- SessionClosedError
+    +-- InvalidRequestError
 """
 
 from __future__ import annotations
@@ -160,3 +161,14 @@ class SessionClosedError(SessionError):
     def __init__(self, session_id: str) -> None:
         self.session_id = session_id
         super().__init__(f"Sessao '{session_id}' ja esta fechada")
+
+
+# --- Request ---
+
+
+class InvalidRequestError(TheoError):
+    """Parametro de request invalido."""
+
+    def __init__(self, detail: str) -> None:
+        self.detail = detail
+        super().__init__(detail)

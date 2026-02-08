@@ -27,6 +27,7 @@ message TranscribeFileRequest {
   repeated string timestamp_granularities = 6;  // "segment", "word"
   string initial_prompt = 7;
   repeated string hot_words = 8;
+  string task = 9;               // "transcribe" ou "translate"
 }
 
 message TranscribeFileResponse {
