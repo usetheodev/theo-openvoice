@@ -8,6 +8,26 @@ e este projeto adere ao [Versionamento Semantico](https://semver.org/lang/pt-BR/
 ## [Unreleased]
 
 ### Added
+- `SchedulerQueue` com fila de prioridade de dois niveis (REALTIME > BATCH), FIFO dentro do mesmo nivel, aging que promove BATCH apos threshold configuravel (default 30s) (#M8-01)
+- `RequestPriority` enum (REALTIME=0, BATCH=1) e `ScheduledRequest` dataclass com cancel_event, enqueue_time e result_future (#M8-01)
+- Dispatch loop assincrono no `Scheduler`: background `asyncio.Task` consome fila, despacha para workers via gRPC, resolve futures (#M8-02)
+- Pool de canais gRPC no Scheduler com reuso por worker address (#M8-02)
+- `Scheduler.submit()` para enfileirar requests com prioridade e obter `asyncio.Future` (#M8-02)
+- `CancellationManager` para rastreamento e cancelamento de requests batch: cancel na fila (<1ms) e cancel em execucao via gRPC Cancel RPC (#M8-03, #M8-04)
+- Propagacao de cancelamento via `cancel_in_flight()` com gRPC Cancel RPC e timeout de 100ms (#M8-04)
+- `BatchAccumulator` para acumulacao de requests BATCH: agrupa por ate 50ms ou max_batch_size, despacha via `asyncio.gather()` (#M8-05)
+- `Scheduler._dispatch_batch()` para despacho paralelo de batch de requests ao mesmo worker (#M8-06)
+- `LatencyTracker` com timestamps por fase (enqueue, dequeue, grpc_start, complete), TTL cleanup e `LatencySummary` frozen dataclass (#M8-07)
+- 7 metricas Prometheus do Scheduler com lazy import: `scheduler_queue_depth` (Gauge), `scheduler_queue_wait_seconds`, `scheduler_grpc_duration_seconds`, `scheduler_cancel_latency_seconds`, `scheduler_batch_size` (Histograms), `scheduler_requests_total` (Counter com labels priority+status), `scheduler_aging_promotions_total` (Counter) (#M8-08)
+- Testes de integracao end-to-end do Scheduler: priorizacao, aging, cancelamento na fila e em execucao, batching, shutdown graceful, latency tracking (#M8-09)
+- Testes de contencao do Scheduler: batch enfileirado durante realtime, anti-starvation, cancel durante contencao, acumulacao sob carga (#M8-09)
+- 191 testes novos para M8 (total: 1408 testes) (#M8-09)
+
+### Changed
+- `Scheduler` evoluido de round-robin trivial (M3) para async dispatch loop com fila de prioridade, cancelamento, batching e metricas (#M8-02)
+- `Scheduler.transcribe()` mantem mesma assinatura externa para backward compatibility com API Server (#M8-02)
+- Graceful shutdown do Scheduler: `stop()` drena in-flight requests, flush pending batches, cancela dispatch loop (#M8-02)
+
 - `WeNetBackend` implementando `STTBackend` ABC para engine WeNet com arquitetura CTC: transcricao batch via `transcribe_file()` e streaming via `transcribe_stream()` com partials nativos (#M7-01, #M7-02)
 - Manifesto `theo.yaml` para WeNet CTC com `architecture: ctc`, `hot_words: true`, `initial_prompt: false`, `word_timestamps: true` (#M7-03)
 - Registro do WeNet na factory `_create_backend()` com lazy import para evitar dependencia obrigatoria de `wenet` (#M7-03)

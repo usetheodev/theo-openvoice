@@ -2,7 +2,7 @@
 
 Runtime unificado de voz (STT + TTS) construido do zero em Python. Orquestra engines de inferencia (Faster-Whisper, Silero VAD, Kokoro, Piper) com API OpenAI-compatible.
 
-**Status: Fase 2 Completa do PRD entregue.** M1 (Foundation), M2 (Worker gRPC), M3 (API Batch), M4 (Pipelines), M5 (WebSocket + VAD), M6 (Session Manager), M7 (Segundo Backend - WeNet) completos. 1217 testes passando. Proximo: M8 (Scheduler Avancado).
+**Status: M8 (Scheduler Avancado) completo.** M1 (Foundation), M2 (Worker gRPC), M3 (API Batch), M4 (Pipelines), M5 (WebSocket + VAD), M6 (Session Manager), M7 (Segundo Backend - WeNet), M8 (Scheduler Avancado) completos. 1408 testes passando. Proximo: M9 (Full-Duplex).
 
 ## Commands
 
@@ -26,7 +26,7 @@ make proto              # generate protobuf stubs
 src/theo/
 ├── server/           # FastAPI — endpoints REST + WebSocket
 │   └── routes/       # transcriptions, translations, health, realtime
-├── scheduler/        # Request routing and prioritization
+├── scheduler/        # Async priority queue, cancellation, batching, latency tracking, metrics
 ├── registry/         # Model Registry (theo.yaml, lifecycle)
 ├── workers/          # Subprocess gRPC management
 │   └── stt/          # STTBackend interface + FasterWhisperBackend + WeNetBackend
@@ -92,6 +92,12 @@ Como adicionar nova engine: @docs/ADDING_ENGINE.md
 - **SessionStateMachine e frozen.** Transicoes invalidas levantam `InvalidTransitionError`. Estado CLOSED e terminal — nenhuma transicao permitida depois.
 - **WAL checkpoint e monotonic.** Usa `time.monotonic()` para timestamps, nunca `time.time()`. Garante consistencia mesmo com ajustes de relogio.
 - **Recovery reenvia uncommitted data.** Apos crash do worker, `recover()` reenvia `ring_buffer.get_uncommitted()` ao novo stream. Nao duplica dados ja commitados gracas ao read fence.
+- **Streaming NAO passa pela PriorityQueue.** WebSocket streaming usa `StreamingGRPCClient` diretamente. A PriorityQueue do Scheduler e apenas para requests batch (REST API).
+- **Scheduler.transcribe() e backward-compatible.** A assinatura externa de M3 e mantida. Internamente usa `_transcribe_inline()` que faz submit+await do future.
+- **CancellationManager remove entry no cancel.** Apos `cancel()`, a request e removida do tracking. `unregister()` e no-op se ja foi cancelada.
+- **BatchAccumulator flush e fire-and-forget.** O flush callback (`_dispatch_batch`) e chamado pelo timer asyncio. Se o scheduler para antes do flush, `stop()` faz flush manual.
+- **LatencyTracker usa TTL.** Entries expiram apos 300s. `cleanup()` deve ser chamado periodicamente para evitar memory leak em requests que nunca completam.
+- **Metricas do Scheduler sao opcionais.** Usam `try/except ImportError` identico a `theo.session.metrics`. Sempre verificar `if metric is not None` antes de observar.
 
 ## Workflow
 

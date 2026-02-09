@@ -6,12 +6,15 @@ Delega transcricao ao STTBackend injetado.
 
 from __future__ import annotations
 
+import asyncio
+import threading
 from typing import TYPE_CHECKING
 
 import grpc
 
 from theo.logging import get_logger
 from theo.proto.stt_worker_pb2 import (
+    CancelResponse,
     TranscribeFileResponse,
     TranscriptEvent,
 )
@@ -28,7 +31,6 @@ if TYPE_CHECKING:
     from theo.proto.stt_worker_pb2 import (
         AudioFrame,
         CancelRequest,
-        CancelResponse,
         HealthRequest,
         TranscribeFileRequest,
     )
@@ -45,19 +47,49 @@ class STTWorkerServicer(_BaseServicer):
     Recebe requests gRPC, delega ao STTBackend, retorna respostas proto.
     """
 
-    def __init__(self, backend: STTBackend, model_name: str, engine: str) -> None:
+    def __init__(
+        self,
+        backend: STTBackend,
+        model_name: str,
+        engine: str,
+        *,
+        max_concurrent: int = 1,
+    ) -> None:
         self._backend = backend
         self._model_name = model_name
         self._engine = engine
+        self._max_concurrent = max(1, max_concurrent)
+        self._inference_semaphore = asyncio.Semaphore(self._max_concurrent)
+        self._cancel_lock = threading.Lock()
+        self._cancelled_requests: set[str] = set()
+        self._current_request_id: str | None = None
+
+    def is_cancelled(self, request_id: str) -> bool:
+        """Verifica se uma request foi cancelada.
+
+        Thread-safe — pode ser chamado de executor threads durante inference.
+        """
+        with self._cancel_lock:
+            return request_id in self._cancelled_requests
 
     async def TranscribeFile(  # noqa: N802  # type: ignore[override]
         self,
         request: TranscribeFileRequest,
         context: grpc.aio.ServicerContext[TranscribeFileRequest, TranscribeFileResponse],
     ) -> TranscribeFileResponse:
-        """Transcricao batch de arquivo de audio."""
+        """Transcricao batch de arquivo de audio.
+
+        Usa semaphore para limitar concorrencia de inference no worker.
+        Multiplas requests podem chegar via asyncio.gather() do scheduler
+        (M8-06 batch dispatch). O semaphore garante que no maximo
+        ``max_concurrent`` inferencias rodam em paralelo.
+        """
         params = proto_request_to_transcribe_params(request)
         request_id = request.request_id
+
+        with self._cancel_lock:
+            self._current_request_id = request_id
+            self._cancelled_requests.discard(request_id)
 
         logger.info(
             "transcribe_file_start",
@@ -67,14 +99,37 @@ class STTWorkerServicer(_BaseServicer):
         )
 
         try:
-            result = await self._backend.transcribe_file(**params)  # type: ignore[arg-type]
+            # Verifica cancelamento antes de adquirir semaphore
+            if self.is_cancelled(request_id):
+                logger.info("transcribe_file_cancelled_before_start", request_id=request_id)
+                await context.abort(grpc.StatusCode.CANCELLED, "Request cancelled")
+                return TranscribeFileResponse()  # pragma: no cover
+
+            async with self._inference_semaphore:
+                # Verifica cancelamento apos adquirir semaphore (pode ter esperado)
+                if self.is_cancelled(request_id):
+                    logger.info(
+                        "transcribe_file_cancelled_after_semaphore",
+                        request_id=request_id,
+                    )
+                    await context.abort(grpc.StatusCode.CANCELLED, "Request cancelled")
+                    return TranscribeFileResponse()  # pragma: no cover
+
+                result = await self._backend.transcribe_file(**params)  # type: ignore[arg-type]
+
+            # Verifica cancelamento apos inference
+            if self.is_cancelled(request_id):
+                logger.info("transcribe_file_cancelled_after_inference", request_id=request_id)
+                await context.abort(grpc.StatusCode.CANCELLED, "Request cancelled")
+                return TranscribeFileResponse()  # pragma: no cover
         except Exception as exc:
             logger.error("transcribe_file_error", request_id=request_id, error=str(exc))
             await context.abort(grpc.StatusCode.INTERNAL, str(exc))
-            # context.abort levanta AbortError no gRPC real, mas adicionamos
-            # return explicito para seguranca — evita `result` indefinida se
-            # abort nao levantar (ex: em mocks ou versoes futuras do gRPC).
             return TranscribeFileResponse()  # pragma: no cover — unreachable em gRPC real
+        finally:
+            with self._cancel_lock:
+                self._current_request_id = None
+                self._cancelled_requests.discard(request_id)
 
         logger.info(
             "transcribe_file_done",
@@ -172,18 +227,27 @@ class STTWorkerServicer(_BaseServicer):
         self,
         request: CancelRequest,
         context: grpc.aio.ServicerContext[CancelRequest, CancelResponse],
-    ) -> None:
-        """Cancelamento unario — nao implementado.
+    ) -> CancelResponse:
+        """Cancelamento cooperativo de request batch em execucao.
 
-        Cancelamento de streaming usa stream break via gRPC call.cancel()
-        no StreamHandle (runtime-side). Este RPC unario e mantido para
-        potencial uso futuro em cancelamento de requests batch.
+        Seta flag interno que e verificado entre segmentos de inference.
+        O cancelamento e cooperative — nao interrompe CUDA kernels em execucao.
+
+        Para streaming, o cancel continua via stream break (gRPC call.cancel()).
         """
-        await context.abort(
-            grpc.StatusCode.UNIMPLEMENTED,
-            "Cancel unario nao implementado. "
-            "Cancelamento de streaming usa stream break via gRPC call.cancel().",
+        request_id = request.request_id
+
+        with self._cancel_lock:
+            self._cancelled_requests.add(request_id)
+            is_current = self._current_request_id == request_id
+
+        logger.info(
+            "cancel_received",
+            request_id=request_id,
+            is_current_request=is_current,
         )
+
+        return CancelResponse(acknowledged=True)
 
     async def Health(  # noqa: N802  # type: ignore[override]
         self,

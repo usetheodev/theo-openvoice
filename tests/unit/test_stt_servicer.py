@@ -222,7 +222,7 @@ class TestTranscribeStream:
 
 
 class TestCancel:
-    async def test_returns_unimplemented(self) -> None:
+    async def test_returns_acknowledged(self) -> None:
         servicer = STTWorkerServicer(
             backend=MockBackend(),
             model_name="large-v3",
@@ -231,9 +231,9 @@ class TestCancel:
         ctx = _make_context()
         from theo.proto.stt_worker_pb2 import CancelRequest
 
-        await servicer.Cancel(CancelRequest(request_id="req-1"), ctx)
-        ctx.abort.assert_called_once()
-        assert ctx.abort.call_args[0][0] == grpc.StatusCode.UNIMPLEMENTED
+        response = await servicer.Cancel(CancelRequest(request_id="req-1"), ctx)
+        assert response.acknowledged is True
+        ctx.abort.assert_not_called()
 
 
 class TestHealth:

@@ -1,4 +1,4 @@
-"""POST /v1/audio/transcriptions — transcricao de arquivo."""
+"""POST /v1/audio/transcriptions — transcricao de arquivo + cancel."""
 
 from __future__ import annotations
 
@@ -17,6 +17,23 @@ from theo.server.dependencies import (
 from theo.server.routes._common import handle_audio_request
 
 router = APIRouter()
+
+
+@router.post("/v1/audio/transcriptions/{request_id}/cancel")
+async def cancel_transcription(
+    request_id: str,
+    scheduler: Scheduler = Depends(get_scheduler),  # noqa: B008
+) -> dict[str, Any]:
+    """Cancela uma request de transcricao na fila ou em execucao.
+
+    Idempotente: cancel de request inexistente ou ja completada retorna
+    ``cancelled: false`` sem erro.
+
+    Returns:
+        JSON com ``request_id`` e ``cancelled`` (bool).
+    """
+    cancelled = scheduler.cancel(request_id)
+    return {"request_id": request_id, "cancelled": cancelled}
 
 
 @router.post("/v1/audio/transcriptions")

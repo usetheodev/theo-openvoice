@@ -531,10 +531,11 @@ Validacao:
 
 ---
 
-### M8 -- Scheduler Avancado
+### M8 -- Scheduler Avancado ✅
 
 **Tema**: T5 -- Escala e Full-Duplex
 **Esforco**: M (2-4 semanas)
+**Status**: **Concluido** (2026-02-09)
 **Dependencias**: M7 (segundo backend para testar scheduling multi-engine), M5 (WebSocket como input real-time)
 
 **Descricao**: Evoluir o Scheduler para suportar priorizacao (realtime > batch), orcamento de latencia por sessao, cancelamento em <=50ms, e dynamic batching no worker.
@@ -564,6 +565,30 @@ Validacao:
 | Priorizacao pode starvar requests batch indefinidamente | Media | Medio | Aging: requests batch ganham prioridade apos N segundos na fila |
 | Dynamic batching adiciona latencia minima de 50ms a toda request | Certa | Baixo | 50ms e aceitavel para batch; streaming bypassa batching |
 | Cancelamento em <50ms requer cooperacao do worker (gRPC nao garante) | Media | Medio | Worker deve checar cancelamento entre chunks de inferencia; nao no meio de um decode |
+
+**Resultado**: Todos os criterios atingidos. 7/7 entregaveis completos. `SchedulerQueue` com fila de prioridade de dois niveis (REALTIME=0 > BATCH=1), FIFO dentro do mesmo nivel e aging que promove BATCH apos threshold configuravel (default 30s). Dispatch loop assincrono como `asyncio.Task` consumindo fila, despachando para workers via pool de canais gRPC e resolvendo futures. `CancellationManager` para cancel na fila (<1ms via cancel_event + future.cancel) e cancel em execucao via gRPC Cancel RPC com timeout de 100ms. `BatchAccumulator` agrupando requests BATCH por ate 50ms ou max_batch_size, despachando via `asyncio.gather()`. `LatencyTracker` com timestamps por fase (enqueue, dequeue, grpc_start, complete) e `LatencySummary` frozen dataclass. 7 metricas Prometheus com lazy import: queue_depth (Gauge), queue_wait_seconds, grpc_duration_seconds, cancel_latency_seconds, batch_size (Histograms), requests_total (Counter com labels priority+status), aging_promotions_total (Counter). `Scheduler.transcribe()` mantem backward compatibility com M3. Graceful shutdown drena in-flight e flush pending batches. Testes de integracao (priorizacao, aging, cancel na fila/in-flight, batching, shutdown, latency tracking) e contencao (batch durante realtime, anti-starvation, cancel durante contencao, acumulacao sob carga). 191 testes novos (total: 1408 testes). mypy strict sem erros, ruff limpo, CI verde.
+
+---
+
+### CHECKPOINT: M8 Completo
+
+Apos M8, o Scheduler Avancado esta entregue:
+
+```
+Validacao:
+  [x] Priorizacao REALTIME > BATCH com fila de prioridade
+  [x] Aging de requests BATCH apos threshold configuravel
+  [x] Cancelamento na fila (<1ms) e em execucao (gRPC Cancel RPC <=50ms)
+  [x] BatchAccumulator para acumulacao e despacho paralelo
+  [x] LatencyTracker com timestamps por fase e summaries
+  [x] 7 metricas Prometheus com lazy import
+  [x] Backward compatibility: Scheduler.transcribe() mesma assinatura de M3
+  [x] Graceful shutdown com drain de in-flight e flush de batches
+  [x] Testes de integracao e contencao
+  [x] 1408 testes, mypy strict, ruff limpo
+```
+
+**O que um usuario pode fazer**: Tudo de M7 + requests batch sao priorizadas corretamente (realtime > batch), com aging para prevenir starvation. Cancelamento de requests funciona tanto na fila (<1ms) quanto em execucao (via gRPC Cancel). Requests batch podem ser acumuladas e despachadas em paralelo via BatchAccumulator. Latencia de cada request rastreada por fase (fila, gRPC, total). Metricas Prometheus para monitoramento de fila, latencia e throughput.
 
 ---
 
@@ -626,7 +651,7 @@ M1 (Fundacao) ✅
 │    │    │    ├──► M5 (WebSocket + VAD) ✅
 │    │    │    │    ├──► M6 (Session Manager) ✅
 │    │    │    │    │    ├──► M7 (Segundo Backend) ✅
-│    │    │    │    │    │    └──► M8 (Scheduler Avancado)
+│    │    │    │    │    │    └──► M8 (Scheduler Avancado) ✅
 │    │    │    │    │    │         └──► M9 (Full-Duplex)
 ```
 
@@ -650,7 +675,7 @@ M1 (Fundacao) ✅
 M1 -> M2 -> M3 -> M4 -> M5 -> M6 -> M7 -> M8 -> M9
 ```
 
-O caminho critico e linear de M1 a M9. Todos os milestones de Fase 1 e 2 estao completos (M1-M7).
+O caminho critico e linear de M1 a M9. Milestones M1-M8 completos. Proximo: M9 (Full-Duplex).
 
 ---
 
@@ -665,7 +690,7 @@ O caminho critico e linear de M1 a M9. Todos os milestones de Fase 1 e 2 estao c
 | M5 -- WebSocket + VAD ✅ | G (4-6 sem) | 11-20 sem |
 | M6 -- Session Manager ✅ | G (4-6 sem) | 15-26 sem |
 | M7 -- Segundo Backend ✅ | M (2-4 sem) | 17-30 sem |
-| M8 -- Scheduler Avancado | M (2-4 sem) | 19-34 sem |
+| M8 -- Scheduler Avancado ✅ | M (2-4 sem) | 19-34 sem |
 | M9 -- Full-Duplex | M (2-4 sem) | 21-38 sem |
 
 **Nota**: Estimativas sao para um time de 3 pessoas.
@@ -709,7 +734,7 @@ Nenhum milestone e considerado "completo" sem estes criterios transversais:
 | M5 | `ttfb_seconds`, `final_delay_seconds`, `active_sessions`, `vad_events_total` |
 | M6 | `session_duration_seconds`, `segments_force_committed_total`, `confidence_avg`, `worker_errors_total` |
 | M7 | Metricas por engine/architecture |
-| M8 | `scheduler_queue_depth`, `scheduler_priority_inversions_total`, `cancel_latency_seconds` |
+| M8 | `scheduler_queue_depth` (Gauge), `scheduler_queue_wait_seconds`, `scheduler_grpc_duration_seconds`, `scheduler_cancel_latency_seconds`, `scheduler_batch_size` (Histograms), `scheduler_requests_total`, `scheduler_aging_promotions_total` (Counters) |
 
 ---
 
