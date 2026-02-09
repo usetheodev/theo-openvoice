@@ -8,7 +8,7 @@
 
 ## 1. O Que É o Theo OpenVoice
 
-Theo OpenVoice é um **runtime unificado de voz** (STT + TTS) construído do zero em Python. Ele orquestra engines de inferência existentes (Faster-Whisper, Silero VAD, Kokoro, Piper) dentro de um único binário com API compatível com OpenAI, CLI inspirado no Ollama, e preparação para telefonia.
+Theo OpenVoice é um **runtime unificado de voz** (STT + TTS) construído do zero em Python. Ele orquestra engines de inferência existentes (Faster-Whisper, Silero VAD, Kokoro, Piper) dentro de um único binário com API compatível com OpenAI e CLI inspirado no Ollama.
 
 **O Theo NÃO é:**
 - Fork ou wrapper de projetos existentes (Speaches, Whisper.cpp, LocalAI)
@@ -26,7 +26,7 @@ Theo OpenVoice é um **runtime unificado de voz** (STT + TTS) construído do zer
 │   Engine de Inferência ──→ [ THEO RUNTIME ] ──→ Produção        │
 │   (Faster-Whisper,         (orquestra,          (API, CLI,      │
 │    Kokoro, Piper)           gerencia,            WebSocket,     │
-│                             preprocessa,         RTP)           │
+│                             preprocessa,         WebSocket)     │
 │                             pós-processa)                       │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -55,7 +55,7 @@ theo serve                          → serve ambos
 ┌─────────────────────────────────────────────────────────────────────┐
 │                                                                     │
 │                        CLIENTES                                     │
-│   CLI (theo transcribe)  │  REST (curl/SDK)  │  WebSocket  │  RTP  │
+│   CLI (theo transcribe)  │  REST (curl/SDK)  │  WebSocket           │
 │                                                                     │
 └──────────────┬────────────┬────────────────────┬──────────┬─────────┘
                │            │                    │          │
@@ -74,10 +74,10 @@ theo serve                          → serve ambos
 │                         SCHEDULER                                   │
 │                                                                     │
 │  • Roteia requests para workers corretos (STT ou TTS)               │
-│  • Priorização: realtime (WebSocket/RTP) > batch (file)             │
+│  • Priorização: realtime (WebSocket) > batch (file)                 │
 │  • Cancelamento em ≤50ms                                            │
 │  • Orçamento de latência por sessão                                 │
-│  • [Fase 3] Dynamic batching                                        │
+│  • [Fase 3] Dynamic batching                                       │
 │                                                                     │
 ├─────────────────────────────────────────────────────────────────────┤
 │                       MODEL REGISTRY                                │
@@ -127,14 +127,6 @@ theo serve                          → serve ambos
 │  • VAD: Silero VAD + energy pre-filter                              │
 │  • Recovery: WAL in-memory, retomada sem duplicação                 │
 │  • LocalAgreement: partial transcripts para encoder-decoder         │
-│                                                                     │
-├─────────────────────────────────────────────────────────────────────┤
-│              RTP LISTENER [Fase 3]                                   │
-│                                                                     │
-│  • Recebe pacotes UDP com payload RTP                               │
-│  • Jitter buffer (20ms)                                             │
-│  • Decodifica G.711 μ-law/A-law → PCM                              │
-│  • Alimenta Audio Preprocessing Pipeline                            │
 │                                                                     │
 ├─────────────────────────────────────────────────────────────────────┤
 │              OBSERVABILIDADE                                         │
@@ -202,7 +194,7 @@ Request chega
 │                  │     • NÃO → enfileira (com prioridade)
 │                  │
 │  Prioridade:     │
-│  1. Streaming    │     (WebSocket/RTP = tempo real)
+│  1. Streaming    │     (WebSocket = tempo real)
 │  2. Batch        │     (upload de arquivo = tolerante a delay)
 └──────────────────┘
 ```
@@ -574,7 +566,7 @@ Normaliza áudio de **qualquer fonte** antes de chegar ao VAD e à engine.
 | **Resample**       | Qualquer SR → 16kHz mono                 | Ativo      | Nunca (engine exige 16kHz)     |
 | **DC Remove**      | HPF 20Hz remove DC offset                | Ativo      | Quando fonte já é limpa        |
 | **Gain Normalize** | Normaliza pico para -3dBFS               | Ativo      | Quando amplitude já é estável  |
-| **Denoise**        | Reduz ruído de fundo                     | Desativado | Habilitar para telefonia/ruidoso|
+| **Denoise**        | Reduz ruído de fundo                     | Desativado | Habilitar para ambientes ruidosos|
 
 ### 4.10 Post-Processing Pipeline
 
@@ -604,25 +596,6 @@ Transforma o texto cru da engine em texto **usável**.
 | ITN (NeMo)           | "dez por cento"                    | "10%"           |
 | Entity (Banking)     | "um dois três ponto quatro..."     | "123.456.789-00"|
 | Hot Word Correction  | "pics" (hot word: PIX)             | "PIX"           |
-
-### 4.11 RTP Listener [Fase 3]
-
-Recebe áudio de telefonia (Asterisk/FreeSWITCH) via RTP raw.
-
-```
-┌──────────┐     RTP (UDP)      ┌──────────────────────────────────┐
-│ Asterisk │ ──────────────────► │ THEO RTP LISTENER                │
-│ (PBX)    │  G.711 μ-law/A-law │                                  │
-│          │                     │  1. Recebe pacotes UDP           │
-│  Faz:    │                     │  2. Jitter buffer (20ms)         │
-│  • SIP   │                     │  3. Decode G.711 → PCM 16-bit   │
-│  • AEC   │                     │  4. → Preprocessing Pipeline     │
-│  • DTMF  │                     │  5. → Session Manager            │
-└──────────┘                     └──────────────────────────────────┘
-
-O Theo NÃO faz: SIP, AEC, DTMF, media negotiation
-O Asterisk DEVE fazer: echo cancellation, isolação de canal
-```
 
 ---
 
@@ -709,29 +682,6 @@ Cliente               API Server         Session Manager        Worker (gRPC)
   │     ajudar?"          │                    │                      │
   │                       │                    │ Ring Buffer fence ►  │
   │ ◄─ vad.speech_end     │                    │                      │
-```
-
-### 5.3 Fluxo Telefonia (Fase 3) — Asterisk → Theo
-
-```
-Telefone → Asterisk            RTP Listener           Preprocessing      Session Manager
-              │                     │                      │                    │
-              │ RTP (G.711 μ-law)   │                      │                    │
-              │────────────────────►│                      │                    │
-              │                     │                      │                    │
-              │                     │ Jitter buffer        │                    │
-              │                     │ Decode G.711→PCM     │                    │
-              │                     │─────────────────────►│                    │
-              │                     │                      │                    │
-              │                     │                      │ Resample 8k→16k   │
-              │                     │                      │ Normalize          │
-              │                     │                      │ Denoise (ativo)    │
-              │                     │                      │───────────────────►│
-              │                     │                      │                    │
-              │                     │                      │                    │ Ring Buffer
-              │                     │                      │                    │ VAD
-              │                     │                      │                    │ Engine
-              │                     │                      │                    │ ...
 ```
 
 ---
@@ -947,7 +897,6 @@ theo transcribe <file> --no-itn                        # Sem ITN
 | Post-Processing Pipeline      | ITN orchestration, Entity Formatting, Hot Word Correction |
 | Ring Buffer                   | Read fence, force commit, zero-copy                    |
 | LocalAgreement                | Partial transcripts para encoder-decoder               |
-| RTP Listener                  | Jitter buffer, G.711 decode                            |
 | CLI                           | `theo pull/serve/transcribe/...`                       |
 | Protocolo gRPC                | Comunicação runtime ↔ worker                           |
 | Protocolo WebSocket           | Eventos de streaming STT                               |
@@ -1014,17 +963,13 @@ curl -F file=@audio.wav -F model=faster-whisper-large-v3 \
 
 **Critério de sucesso:** Sessão WebSocket de 30 min sem degradação, com recovery sem duplicação.
 
-### Fase 3 — Telefonia + Scheduler Avançado (8 semanas)
+### Fase 3 — Escala + Full-Duplex (4 semanas)
 
 **Entregáveis:**
-- RTP Listener (jitter buffer, G.711 decode)
-- Preprocessing automático para telefonia (detect 8kHz, denoise ativo)
-- Integração testada com Asterisk
-- Documentação de integration requirements (AEC, TALK_DETECT)
-- Mute-on-speak fallback
 - Scheduler com priorização (realtime > batch)
 - Dynamic batching no worker
 - Co-scheduling STT + TTS (agentes full-duplex)
+- Mute-on-speak fallback
 
 ---
 
@@ -1038,10 +983,9 @@ curl -F file=@audio.wav -F model=faster-whisper-large-v3 \
 | 004   | Windowing Adaptativo + LocalAgreement             | Aceito  |
 | 005   | Ring Buffer Pre-alocado com Read Fence            | Aceito  |
 | 006   | Protocolo WebSocket JSON (inspirado OpenAI)       | Aceito  |
-| 007   | Telefonia: Apenas RTP Raw (AEC = PBX)             | Aceito  |
-| 008   | Audio Preprocessing no Runtime                    | Aceito  |
-| 009   | LocalAgreement para Partial Transcripts           | Aceito  |
-| 010   | Post-Processing Pipeline Plugável                 | Aceito  |
+| 007   | Audio Preprocessing no Runtime                    | Aceito  |
+| 008   | LocalAgreement para Partial Transcripts           | Aceito  |
+| 009   | Post-Processing Pipeline Plugável                 | Aceito  |
 
 Detalhes completos de cada ADR no [PRD v2.1](./PRD.md#architecture-decision-records-adrs).
 

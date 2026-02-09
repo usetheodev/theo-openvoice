@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from theo._types import ResponseFormat  # noqa: TC001
+from theo._types import ResponseFormat
 
 
 @dataclass(frozen=True, slots=True)

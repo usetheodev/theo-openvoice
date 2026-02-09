@@ -23,13 +23,13 @@ Este documento define a sequencia de implementacao do Theo OpenVoice, organizada
 
 ### Mapa de Fases vs. Milestones
 
-O PRD define 3 fases de produto. Este roadmap decompoe essas fases em **10 milestones** com granularidade executavel. As fases do PRD sao mantidas como agrupamento logico, mas a unidade de planejamento e o milestone.
+O PRD define 3 fases de produto. Este roadmap decompoe essas fases em **9 milestones** com granularidade executavel. As fases do PRD sao mantidas como agrupamento logico, mas a unidade de planejamento e o milestone.
 
 ```
-PRD Fase 1 (STT Batch) ✅       PRD Fase 2 (Streaming) ✅       PRD Fase 3 (Telefonia)
-├── M1: Fundacao ✅             ├── M5: WebSocket + VAD ✅      ├── M8: RTP Listener
-├── M2: Worker gRPC ✅          ├── M6: Session Manager ✅      ├── M9: Scheduler Avancado
-├── M3: API Batch ✅            └── M7: Segundo Backend ✅      └── M10: Full-Duplex
+PRD Fase 1 (STT Batch) ✅       PRD Fase 2 (Streaming) ✅       PRD Fase 3 (Escala + Full-Duplex)
+├── M1: Fundacao ✅             ├── M5: WebSocket + VAD ✅      ├── M8: Scheduler Avancado
+├── M2: Worker gRPC ✅          ├── M6: Session Manager ✅      └── M9: Full-Duplex
+├── M3: API Batch ✅            └── M7: Segundo Backend ✅
 └── M4: Pipelines ✅
 ```
 
@@ -63,11 +63,11 @@ Cada tema representa um eixo de valor que atravessa multiplos milestones.
 **Diferencial**: Prova que a interface `STTBackend` funciona para arquiteturas fundamentalmente diferentes.
 **Milestones**: M7
 
-### T5 -- Telefonia e Escala
+### T5 -- Escala e Full-Duplex
 
-**Valor**: O runtime recebe audio de PBX (Asterisk) via RTP, com preprocessing automatico, scheduling avancado e co-scheduling STT+TTS.
-**Diferencial**: Preparacao para producao em cenarios de call center.
-**Milestones**: M8, M9, M10
+**Valor**: O runtime suporta scheduling avancado com priorizacao, dynamic batching e co-scheduling STT+TTS para agentes de voz full-duplex.
+**Diferencial**: Scheduler inteligente e coordenacao STT+TTS para producao em escala.
+**Milestones**: M8, M9
 
 ---
 
@@ -216,7 +216,7 @@ curl -F file=@audio.wav -F model=faster-whisper-tiny \
 
 **Resultado**: Todos os criterios atingidos. 13/13 tasks do STRATEGIC_M3.md completas. FastAPI app com `create_app()` factory e injecao de dependencias via `app.state`. Endpoints `POST /v1/audio/transcriptions` e `POST /v1/audio/translations` compativeis com contrato OpenAI. `GET /health` com status e versao. `ModelRegistry` para scan de modelos em disco com resolucao por nome. `Scheduler` basico roteando requests para workers via gRPC com conversores proto<->dominio. Formatos de resposta: json, verbose_json, text, srt, vtt com formatters dedicados. Error handlers HTTP (400, 404, 413, 503, 500) com formato OpenAI-compatible e `InvalidRequestError` para parametros invalidos. CLI: `theo serve`, `theo transcribe`, `theo translate`, `theo list`, `theo inspect` via Click. Pydantic models para request/response com validacao. 275 testes (219 novos: e2e batch, SDK compat, CLI, routes, formatters, error handling, registry, scheduler, models). Validado com SDK `openai` Python como cliente real contra servidor Theo. Code review pos-implementacao com 3 fixes aplicados: (CR1) validacao de `response_format` invalido retorna 400 em vez de 500, (CR2) pre-check de `file.size` via Content-Length antes de `await file.read()`, (CR3) carry correto de milissegundos em timestamps SRT/VTT via `divmod`. mypy strict sem erros, ruff limpo, CI verde.
 
-**Perspectiva Viktor (Real-Time)**: O Scheduler nesta fase e trivial (round-robin de 1 worker), mas a interface deve ser definida para suportar priorizacao futura. Nao fazer God class -- o Scheduler de M3 deve ser substituivel pelo de M9 sem mudar API Server.
+**Perspectiva Viktor (Real-Time)**: O Scheduler nesta fase e trivial (round-robin de 1 worker), mas a interface deve ser definida para suportar priorizacao futura. Nao fazer God class -- o Scheduler de M3 deve ser substituivel pelo de M8 sem mudar API Server.
 
 **Perspectiva Andre (Platform)**: Metricas Prometheus desde M3. Mesmo basicas (`requests_total`, `latency_seconds`, `errors_total`), elas estabelecem o padrao. Adicionar metricas STT-especificas e incremental depois.
 
@@ -265,7 +265,7 @@ curl -F file=@audio_44khz.wav -F model=faster-whisper-tiny \
 | ITN introduz erros em edge cases (ex: "um" -> "1" quando e artigo) | Media | Medio | Testes extensivos com corpus pt-BR; flag `--no-itn` no CLI e `itn: false` na API |
 | Denoise (RNNoise) tem binding Python instavel em algumas plataformas | Media | Baixo | Denoise e desativado por default; fallback graceful se binding falhar |
 
-**Resultado**: Todos os criterios atingidos. 10/10 tasks do STRATEGIC_M4.md completas. Audio Preprocessing Pipeline com 3 stages (Resample via `scipy.signal.resample_poly`, DC Remove via Butterworth HPF 20Hz, Gain Normalize para -3dBFS peak). Post-Processing Pipeline com ITN stage via `nemo_text_processing` (fail-open: se nao instalado, retorna texto original com warning). Ambos pipelines integrados no fluxo batch via `app.state` e FastAPI `Depends()`. Controle de ITN via campo `itn` na API REST (default `true`) e flag `--no-itn` no CLI. `soundfile` para decode de WAV/FLAC/OGG com fallback `wave` (stdlib). Interfaces `AudioStage` e `TextStage` projetadas para composabilidade e extensibilidade futura (Denoise em M8, Entity Formatting e Hot Word Correction em M6). 132 testes novos (total: 400 testes). Makefile para dev workflow (`make check`, `make test`, `make ci`). mypy strict sem erros (inclusive fix de 5 erros pre-existentes em converters.py, servicer.py, serve.py). ruff limpo. `scipy-stubs` adicionado para type checking completo.
+**Resultado**: Todos os criterios atingidos. 10/10 tasks do STRATEGIC_M4.md completas. Audio Preprocessing Pipeline com 3 stages (Resample via `scipy.signal.resample_poly`, DC Remove via Butterworth HPF 20Hz, Gain Normalize para -3dBFS peak). Post-Processing Pipeline com ITN stage via `nemo_text_processing` (fail-open: se nao instalado, retorna texto original com warning). Ambos pipelines integrados no fluxo batch via `app.state` e FastAPI `Depends()`. Controle de ITN via campo `itn` na API REST (default `true`) e flag `--no-itn` no CLI. `soundfile` para decode de WAV/FLAC/OGG com fallback `wave` (stdlib). Interfaces `AudioStage` e `TextStage` projetadas para composabilidade e extensibilidade futura (Denoise, Entity Formatting e Hot Word Correction). 132 testes novos (total: 400 testes). Makefile para dev workflow (`make check`, `make test`, `make ci`). mypy strict sem erros (inclusive fix de 5 erros pre-existentes em converters.py, servicer.py, serve.py). ruff limpo. `scipy-stubs` adicionado para type checking completo.
 
 **Perspectiva Sofia (Arquitetura)**: Cada stage deve seguir a mesma interface (`process(audio) -> audio` para pre, `process(text) -> text` para pos). Isso garante composabilidade e facilita adicionar stages futuros sem mudar o orquestrador. KISS -- nao over-engineer o pipeline pattern.
 
@@ -531,47 +531,11 @@ Validacao:
 
 ---
 
-### M8 -- RTP Listener
+### M8 -- Scheduler Avancado
 
-**Tema**: T5 -- Telefonia e Escala
+**Tema**: T5 -- Escala e Full-Duplex
 **Esforco**: M (2-4 semanas)
-**Dependencias**: M6 (Session Manager para criar sessoes RTP), M4 (preprocessing com denoise)
-
-**Descricao**: Implementar ingestao de audio via RTP raw (UDP) com jitter buffer e decode G.711. Este milestone conecta o Theo ao mundo da telefonia, permitindo receber audio diretamente de um PBX (Asterisk/FreeSWITCH).
-
-**Entregaveis**:
-
-| # | Entregavel | Responsavel |
-|---|-----------|-------------|
-| 1 | RTP Listener: socket UDP que recebe pacotes RTP | Viktor |
-| 2 | Jitter buffer: reordenacao de pacotes, 20ms de buffer configuravel | Viktor |
-| 3 | Decode G.711: mu-law e A-law para PCM 16-bit | Viktor |
-| 4 | Preprocessing automatico para telefonia: detecta 8kHz, denoise ativado por default | Viktor |
-| 5 | Audio quality tagging: `audio_quality: telephony` no contexto da sessao | Viktor |
-| 6 | Integracao com Session Manager: cria sessao por stream RTP | Sofia |
-| 7 | Documentacao de integration requirements: AEC, TALK_DETECT, channel isolation (Asterisk) | Andre |
-| 8 | Teste de integracao com Asterisk (ou simulador RTP) | Todos |
-
-**Criterio de sucesso**:
-```
-# Asterisk envia RTP para Theo, transcricao em tempo real
-# (ou: simulador RTP envia audio G.711, Theo transcreve)
-```
-
-**Riscos**:
-| Risco | Probabilidade | Impacto | Mitigacao |
-|-------|--------------|---------|-----------|
-| Jitter em redes reais causa gaps no audio que degradam WER | Media | Medio | Jitter buffer configuravel; monitorar packet loss como metrica |
-| G.711 8kHz upsampled para 16kHz perde qualidade (banda limitada a 4kHz) | Certa | Medio | Documentar limitacao; recomendar modelos telephony-optimized no registry |
-| Teste com Asterisk real requer infraestrutura de telefonia | Alta | Baixo | Usar simulador RTP (script Python que envia pacotes UDP) para CI; Asterisk real em teste manual |
-
----
-
-### M9 -- Scheduler Avancado
-
-**Tema**: T5 -- Telefonia e Escala
-**Esforco**: M (2-4 semanas)
-**Dependencias**: M8 (RTP como segundo tipo de input real-time), M5 (WebSocket como primeiro)
+**Dependencias**: M7 (segundo backend para testar scheduling multi-engine), M5 (WebSocket como input real-time)
 
 **Descricao**: Evoluir o Scheduler para suportar priorizacao (realtime > batch), orcamento de latencia por sessao, cancelamento em <=50ms, e dynamic batching no worker.
 
@@ -579,7 +543,7 @@ Validacao:
 
 | # | Entregavel | Responsavel |
 |---|-----------|-------------|
-| 1 | Priorizacao: realtime (WebSocket/RTP) > batch (file upload) | Viktor |
+| 1 | Priorizacao: realtime (WebSocket) > batch (file upload) | Viktor |
 | 2 | Fila por prioridade: requests batch esperam quando workers estao ocupados com streaming | Viktor |
 | 3 | Cancelamento em <=50ms: propagacao via gRPC `Cancel` RPC | Viktor |
 | 4 | Orcamento de latencia por sessao: tracking de TTFB e final_delay por sessao | Viktor |
@@ -603,11 +567,11 @@ Validacao:
 
 ---
 
-### M10 -- Full-Duplex (STT + TTS)
+### M9 -- Full-Duplex (STT + TTS)
 
-**Tema**: T5 -- Telefonia e Escala
+**Tema**: T5 -- Escala e Full-Duplex
 **Esforco**: M (2-4 semanas)
-**Dependencias**: M9 (Scheduler avancado), M8 (RTP Listener)
+**Dependencias**: M8 (Scheduler avancado)
 
 **Descricao**: Habilitar co-scheduling de STT + TTS para agentes de voz full-duplex. Inclui mute-on-speak como fallback para cenarios sem AEC.
 
@@ -619,7 +583,7 @@ Validacao:
 | 2 | Mute-on-speak: pausar ingestao STT enquanto TTS esta ativo na mesma sessao | Viktor |
 | 3 | Evento `tts.speaking_start` / `tts.speaking_end` para coordenacao | Sofia |
 | 4 | Testes: sessao full-duplex com STT + TTS simultaneos | Todos |
-| 5 | Documentacao: guia de integracao com Asterisk para cenario full-duplex | Andre |
+| 5 | Documentacao: guia de integracao para cenario full-duplex | Andre |
 
 **Criterio de sucesso**:
 ```
@@ -631,7 +595,7 @@ Validacao:
 **Riscos**:
 | Risco | Probabilidade | Impacto | Mitigacao |
 |-------|--------------|---------|-----------|
-| Mute-on-speak elimina barge-in (usuario nao pode interromper o bot) | Certa | Medio | Documentar como limitacao; barge-in requer AEC no PBX |
+| Mute-on-speak elimina barge-in (usuario nao pode interromper o bot) | Certa | Medio | Documentar como limitacao; barge-in requer AEC externo |
 | Coordenacao STT/TTS adiciona latencia ao pipeline | Media | Medio | Sinais assincronos (eventos, nao polling); nao bloquear STT esperando TTS |
 | Latencia V2V de 300ms e agressiva para ponta a ponta | Alta | Alto | Medir por componente; identificar gargalos; aceitar 500ms como target inicial |
 
@@ -639,17 +603,15 @@ Validacao:
 
 ### CHECKPOINT: Fase 3 Completa
 
-Apos M10, a Fase 3 do PRD esta entregue:
+Apos M9, a Fase 3 do PRD esta entregue:
 
 ```
 Validacao:
-  [x] RTP Listener funcional com jitter buffer e G.711 decode
-  [x] Preprocessing automatico para telefonia
   [x] Scheduler com priorizacao e cancelamento
   [x] Dynamic batching no worker
   [x] Co-scheduling STT + TTS
   [x] Mute-on-speak como fallback
-  [x] Documentacao de integracao com Asterisk
+  [x] Documentacao de integracao full-duplex
 ```
 
 ---
@@ -662,13 +624,10 @@ M1 (Fundacao) ✅
 │    ├──► M3 (API Batch + CLI) ✅
 │    │    ├──► M4 (Pipelines) ✅
 │    │    │    ├──► M5 (WebSocket + VAD) ✅
-│    │    │    │    ├──► M6 (Session Manager)
-│    │    │    │    │    ├──► M7 (Segundo Backend)
-│    │    │    │    │    └──► M8 (RTP Listener)
-│    │    │    │    │         └──► M9 (Scheduler Avancado)
-│    │    │    │    │              └──► M10 (Full-Duplex)
-│    │    │    │    │
-│    │    │    │    └──► M8 (RTP Listener)  [via preprocessing streaming]
+│    │    │    │    ├──► M6 (Session Manager) ✅
+│    │    │    │    │    ├──► M7 (Segundo Backend) ✅
+│    │    │    │    │    │    └──► M8 (Scheduler Avancado)
+│    │    │    │    │    │         └──► M9 (Full-Duplex)
 ```
 
 ### Dependencias Detalhadas
@@ -682,18 +641,16 @@ M1 (Fundacao) ✅
 | M5 | M4, M2 | Preprocessing em modo streaming; worker com gRPC streaming |
 | M6 | M5 | WebSocket + VAD funcional como base do Session Manager |
 | M7 | M6 | Session Manager completo para testar pipeline adaptativo |
-| M8 | M6, M4 | Session Manager para criar sessoes; preprocessing com denoise |
-| M9 | M8, M5 | Multiplos tipos de input (WS + RTP) para priorizar |
-| M10 | M9, M8 | Scheduler avancado + RTP para full-duplex |
+| M8 | M7, M5 | Multi-engine para scheduling; WebSocket como input real-time |
+| M9 | M8 | Scheduler avancado para co-scheduling STT+TTS |
 
 ### Caminho Critico
 
 ```
-M1 -> M2 -> M3 -> M4 -> M5 -> M6 -> M7
-                                 \-> M8 -> M9 -> M10
+M1 -> M2 -> M3 -> M4 -> M5 -> M6 -> M7 -> M8 -> M9
 ```
 
-O caminho critico principal vai de M1 a M7 (entrega completa de STT model-agnostic com streaming). M8-M10 (telefonia) podem iniciar em paralelo apos M6, mas dependem do mesmo time.
+O caminho critico e linear de M1 a M9. Todos os milestones de Fase 1 e 2 estao completos (M1-M7).
 
 ---
 
@@ -707,12 +664,11 @@ O caminho critico principal vai de M1 a M7 (entrega completa de STT model-agnost
 | M4 -- Pipelines ✅ | M (2-4 sem) | 7-14 sem |
 | M5 -- WebSocket + VAD ✅ | G (4-6 sem) | 11-20 sem |
 | M6 -- Session Manager ✅ | G (4-6 sem) | 15-26 sem |
-| M7 -- Segundo Backend | M (2-4 sem) | 17-30 sem |
-| M8 -- RTP Listener | M (2-4 sem) | 19-34 sem |
-| M9 -- Scheduler | M (2-4 sem) | 21-38 sem |
-| M10 -- Full-Duplex | M (2-4 sem) | 23-42 sem |
+| M7 -- Segundo Backend ✅ | M (2-4 sem) | 17-30 sem |
+| M8 -- Scheduler Avancado | M (2-4 sem) | 19-34 sem |
+| M9 -- Full-Duplex | M (2-4 sem) | 21-38 sem |
 
-**Nota**: Estimativas sao para um time de 3 pessoas. Milestones M8-M10 podem ser parcialmente paralelos com M7 dependendo da alocacao do time.
+**Nota**: Estimativas sao para um time de 3 pessoas.
 
 ---
 
@@ -720,13 +676,12 @@ O caminho critico principal vai de M1 a M7 (entrega completa de STT model-agnost
 
 | # | Risco | Milestones Afetados | Probabilidade | Impacto | Mitigacao |
 |---|-------|-------------------|--------------|---------|-----------|
-| R1 | Interface `STTBackend` precisa mudar significativamente apos M7 (WeNet nao se encaixa) | M2, M7 e todos subsequentes | Media | Alto | Validar interface com pseudocodigo de WeNet em M1; ajustar antes de implementar |
+| R1 | Interface `STTBackend` precisa mudar significativamente apos M7 (WeNet nao se encaixa) | M2, M7 e todos subsequentes | ~~Media~~ **Mitigado** | Alto | Validado em M7: interface funciona para encoder-decoder E CTC sem mudancas |
 | R2 | Dependencias pesadas (Faster-Whisper, NeMo, WeNet) conflitam em mesmo ambiente | M2, M4, M7 | Media | Alto | Isolamento por subprocess resolve conflitos de runtime; extras opcionais no pyproject.toml |
-| R3 | Latencia de gRPC streaming e maior que esperado (overhead de serialization por frame) | M5, M6, M8 | Media | Alto | Benchmark gRPC vs alternativas (shared memory, pipes) em M5; aceitar gRPC se overhead <5ms |
-| R4 | Silero VAD nao funciona bem com audio de telefonia (8kHz upsampled) | M5, M8 | Media | Medio | Testar com audio 8kHz em M5; ajustar sensitivity; considerar VAD alternativo para telefonia |
-| R5 | `nemo_text_processing` e instavel ou muito pesado para instalar | M4 | Media | Medio | Implementar fallback com regex basico; NeMo como optional dependency |
-| R6 | Memory leak em sessoes longas (WebSocket, gRPC, Ring Buffer) | M5, M6, M8 | Media | Alto | Testes de estabilidade de 30 min no CI; monitorar RSS; Ring Buffer fixo previne o mais obvio |
-| R7 | Complexidade do Session Manager cresce alem do gerenciavel | M6 | Media | Alto | Decomposicao em sub-componentes (StateMachine, RingBuffer, WAL, LocalAgreement); cada um testavel isoladamente |
+| R3 | Latencia de gRPC streaming e maior que esperado (overhead de serialization por frame) | M5, M6 | Media | Alto | Benchmark gRPC vs alternativas (shared memory, pipes) em M5; aceitar gRPC se overhead <5ms |
+| R4 | `nemo_text_processing` e instavel ou muito pesado para instalar | M4 | Media | Medio | Implementar fallback com regex basico; NeMo como optional dependency |
+| R5 | Memory leak em sessoes longas (WebSocket, gRPC, Ring Buffer) | M5, M6 | Media | Alto | Testes de estabilidade de 30 min no CI; monitorar RSS; Ring Buffer fixo previne o mais obvio |
+| R6 | Complexidade do Session Manager cresce alem do gerenciavel | M6 | ~~Media~~ **Mitigado** | Alto | Decomposicao em sub-componentes validada: StateMachine, RingBuffer, WAL, LocalAgreement |
 
 ---
 
@@ -754,8 +709,7 @@ Nenhum milestone e considerado "completo" sem estes criterios transversais:
 | M5 | `ttfb_seconds`, `final_delay_seconds`, `active_sessions`, `vad_events_total` |
 | M6 | `session_duration_seconds`, `segments_force_committed_total`, `confidence_avg`, `worker_errors_total` |
 | M7 | Metricas por engine/architecture |
-| M8 | `rtp_packet_loss_total`, `rtp_jitter_seconds` |
-| M9 | `scheduler_queue_depth`, `scheduler_priority_inversions_total`, `cancel_latency_seconds` |
+| M8 | `scheduler_queue_depth`, `scheduler_priority_inversions_total`, `cancel_latency_seconds` |
 
 ---
 

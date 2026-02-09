@@ -62,11 +62,10 @@ PRD Fase 2 (Streaming)
   M6: Session Manager           [COMPLETO]
   M7: Segundo Backend           [<-- ESTE MILESTONE]
 
-Caminho critico: M5 -> M6 -> M7
-                         \-> M8 (RTP Listener)
+Caminho critico: M5 -> M6 -> M7 -> M8 (Scheduler) -> M9 (Full-Duplex)
 ```
 
-M7 completa a Fase 2 do PRD. Apos M7, o Theo e model-agnostic validado. M8-M10 (Fase 3) adicionam telefonia e scheduling avancado.
+M7 completa a Fase 2 do PRD. Apos M7, o Theo e model-agnostic validado. M8-M9 (Fase 3) adicionam scheduling avancado e full-duplex.
 
 ---
 
@@ -966,9 +965,8 @@ Validacao:
 | `theo pull wenet-ctc` (download automatico de modelo) | Futuro | Registry local ainda nao tem download. Modelo instalado manualmente. |
 | Paraformer (`streaming-native`) | Futuro | M7 valida CTC. Paraformer e a terceira arquitetura -- sera trivial apos M7. |
 | Testes de performance comparativa (WER, latencia) | Futuro | M7 valida contrato, nao qualidade. Performance e cenario de benchmark separado. |
-| Dynamic batching para WeNet | M9 | Otimizacao de throughput, fora de escopo de model-agnostic. |
+| Dynamic batching para WeNet | M8 | Otimizacao de throughput, fora de escopo de model-agnostic. |
 | Metricas por engine/architecture | Futuro | Metricas atuais sao globais. Separar por engine e refinamento futuro. |
-| RTP Listener | M8 | Telefonia e Fase 3. |
 | Hot Word Correction post-processing (Levenshtein) | Futuro | Domain-specific, nao necessario para validacao model-agnostic. |
 | Entity Formatting (CPF, CNPJ) | Futuro | Domain-specific. |
 
@@ -984,16 +982,16 @@ Ao completar M7, o time deve ter:
 
 3. **Documentacao de extensibilidade** -- qualquer dev pode adicionar uma terceira engine seguindo o guia `ADDING_ENGINE.md`.
 
-4. **Pontos de extensao para M8**:
-   - **RTP Listener**: cria sessao via `StreamingSession` (mesmo contrato que WebSocket). Ring Buffer e Session Manager reutilizados.
-   - **Denoise**: adicionado como stage no preprocessing pipeline. Ativado por default para audio RTP.
-   - **Audio quality tagging**: `audio_quality: telephony` informado ao registry para selecionar modelos adequados.
-
-5. **Pontos de extensao para M9**:
-   - **Scheduler avancado**: priorizacao realtime > batch. Ambos os tipos de engine sao candidatos.
+4. **Pontos de extensao para M8 (Scheduler Avancado)**:
+   - **Priorizacao**: realtime (WebSocket) > batch (file upload). Ambos os tipos de engine sao candidatos.
    - **Dynamic batching**: aplicavel a ambos os backends que suportam (`batch_inference: true` no manifesto).
+   - **Cancelamento em <=50ms**: propagacao via gRPC `Cancel` RPC.
 
-**O primeiro commit de M8 sera**: implementar `RTPListener` que recebe pacotes UDP, decodifica G.711, e alimenta o preprocessing pipeline existente.
+5. **Pontos de extensao para M9 (Full-Duplex)**:
+   - **Co-scheduling STT + TTS**: scheduler aloca workers de ambos os tipos para a mesma sessao.
+   - **Mute-on-speak**: pausar ingestao STT enquanto TTS esta ativo na mesma sessao.
+
+**O primeiro commit de M8 sera**: implementar priorizacao no Scheduler (realtime > batch) com fila por prioridade.
 
 ---
 

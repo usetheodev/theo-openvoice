@@ -2,7 +2,7 @@
 
 Runtime unificado de voz (STT + TTS) construido do zero em Python. Orquestra engines de inferencia (Faster-Whisper, Silero VAD, Kokoro, Piper) com API OpenAI-compatible.
 
-**Status: Fase 2 Completa do PRD entregue.** M1 (Foundation), M2 (Worker gRPC), M3 (API Batch), M4 (Pipelines), M5 (WebSocket + VAD), M6 (Session Manager), M7 (Segundo Backend - WeNet) completos. 1164 testes passando. Proximo: M8 (RTP Listener).
+**Status: Fase 2 Completa do PRD entregue.** M1 (Foundation), M2 (Worker gRPC), M3 (API Batch), M4 (Pipelines), M5 (WebSocket + VAD), M6 (Session Manager), M7 (Segundo Backend - WeNet) completos. 1217 testes passando. Proximo: M8 (Scheduler Avancado).
 
 ## Commands
 

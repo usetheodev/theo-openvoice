@@ -4,7 +4,7 @@
 
 **Revisão**: v2.1 — clarifica posicionamento: construção from-scratch com bibliotecas maduras. Speaches e Ollama são inspirações, não dependências.
 **Changelog v2.1**: Seção "Filosofia de Construção" adicionada. ADR-002 reescrito. Referências a Speaches e Ollama reposicionadas como inspirações arquiteturais. Análise competitiva expandida com Ollama como inspiração de UX/CLI.
-**Changelog v2.0**: Audio Preprocessing Pipeline, Inverse Text Normalization, LocalAgreement para partials, Echo Cancellation strategy, Hot Words, Cross-segment context, métricas de qualidade, backpressure WebSocket, corner cases de telefonia.
+**Changelog v2.0**: Audio Preprocessing Pipeline, Inverse Text Normalization, LocalAgreement para partials, Hot Words, Cross-segment context, métricas de qualidade, backpressure WebSocket.
 
 ---
 
@@ -16,7 +16,6 @@ O projeto nasce da observação de lacunas recorrentes em projetos open-source e
 
 - Forte acoplamento a uma única engine (ex: Whisper) sem abstração real.
 - Ausência de scheduler temporal consciente de sessões.
-- Falta de suporte nativo a cenários de telefonia (ingestão RTP).
 - Abstração incompleta para múltiplas arquiteturas de STT.
 - **[v2]** Ausência de audio preprocessing pipeline.
 - **[v2]** Falta de Inverse Text Normalization (ITN) para output usável em domínios especializados.
@@ -52,7 +51,7 @@ Dois projetos influenciaram decisões de design do Theo, mas nenhum código dele
 
 **Ollama** — inspiração para o modelo de UX/CLI. A experiência de `ollama pull`, `ollama serve`, `ollama list` para modelos LLM é o padrão que o Theo adapta para modelos de voz: `theo pull`, `theo serve`, `theo list`. A ideia de um registry local com download sob demanda, manifesto declarativo e um único binário que "just works" vem diretamente da observação do Ollama.
 
-**Speaches** — inspiração para o contrato de API. Speaches demonstrou que uma API compatível com OpenAI para STT é viável e desejável. O Theo adota a compatibilidade com a OpenAI Audio API como princípio, mas resolve as limitações arquiteturais observadas: acoplamento ao Whisper, ausência de session manager, falta de scheduler multi-engine, e nenhum suporte a telefonia.
+**Speaches** — inspiração para o contrato de API. Speaches demonstrou que uma API compatível com OpenAI para STT é viável e desejável. O Theo adota a compatibilidade com a OpenAI Audio API como princípio, mas resolve as limitações arquiteturais observadas: acoplamento ao Whisper, ausência de session manager, e falta de scheduler multi-engine.
 
 **whisper-streaming** — inspiração para o algoritmo LocalAgreement. O conceito de confirmar tokens por concordância entre passes consecutivas é adaptado do projeto [whisper-streaming](https://github.com/ufal/whisper_streaming) da UFAL. A implementação no Theo é integrada ao Session Manager e ao pipeline de streaming do runtime, não uma cópia do código.
 
@@ -120,7 +119,7 @@ Dois projetos influenciaram decisões de design do Theo, mas nenhum código dele
 
 | Projeto | O que faz | Limitação principal |
 |---|---|---|
-| **Speaches** | Serve Whisper com API OpenAI-compatible | Acoplado ao Whisper, sem scheduler, sem telefonia |
+| **Speaches** | Serve Whisper com API OpenAI-compatible | Acoplado ao Whisper, sem scheduler, sem session manager |
 | **Whisper.cpp server** | Serve Whisper via HTTP | Apenas Whisper, sem streaming real, sem session |
 | **whisper-streaming** | LocalAgreement para Whisper online | Sem runtime, sem registry, sem multi-engine |
 | **Vosk Server** | Serve Vosk/Kaldi via WebSocket | API proprietária, sem compatibilidade OpenAI |
@@ -143,7 +142,7 @@ Dois projetos influenciaram decisões de design do Theo, mas nenhum código dele
 - **Runtime unificado**: mesmo produto que serve TTS, compartilhando registry, scheduler e CLI.
 - **CLI inspirado no Ollama**: `theo pull`, `theo serve`, `theo list` — UX familiar para quem já usa Ollama, adaptado para modelos de voz.
 - **Streaming-first com contrato claro**: formato de eventos definido, não apenas "partial transcripts".
-- **Preparado para telefonia**: ingestão RTP como módulo, não como hack.
+- **Extensível**: consumidores podem integrar qualquer transporte (RTP, SIP) via WebSocket.
 - **[v2] Audio Preprocessing Pipeline**: resample, normalize, denoise — comportamento consistente independente da fonte de áudio.
 - **[v2] Post-Processing Pipeline**: ITN e entity formatting plugáveis por idioma/domínio.
 - **[v2] Partial transcripts inteligentes**: LocalAgreement (inspirado no whisper-streaming) para encoder-decoder, nativos para CTC/streaming.
@@ -167,10 +166,9 @@ Dois projetos influenciaram decisões de design do Theo, mas nenhum código dele
 
 - Treinamento de modelos.
 - UI gráfica.
-- SIP signaling (apenas ingestão RTP raw na Fase 3).
+- SIP signaling e ingestão RTP (consumidores integram via WebSocket).
 - Speaker diarization (escopo futuro).
 - Billing / autenticação comercial.
-- **[v2]** Acoustic Echo Cancellation (AEC) — responsabilidade do PBX. Documentado como requirement de integração.
 
 ---
 
@@ -180,8 +178,7 @@ Dois projetos influenciaram decisões de design do Theo, mas nenhum código dele
 - **UC-02**: Transcrever áudio em tempo real via WebSocket, recebendo partial e final transcripts como eventos JSON.
 - **UC-03**: Trocar engine STT (ex: Faster-Whisper → WeNet) sem alterar código do cliente — apenas mudar o campo `model`.
 - **UC-04**: Manter sessão de streaming por 30+ minutos (call center) com estado gerenciado e recovery de falhas.
-- **UC-05**: Receber áudio de um Asterisk via RTP e transcrever em tempo real.
-- **UC-06**: Executar múltiplas sessões simultâneas com priorização (telefonia > batch).
+- **UC-05**: Executar múltiplas sessões simultâneas com priorização (streaming > batch).
 - **UC-07**: Traduzir áudio para inglês via endpoint de translation.
 - **UC-08 [v2]**: Receber áudio em qualquer sample rate (8kHz, 44.1kHz, 48kHz) e transcrever corretamente via preprocessing automático.
 - **UC-09 [v2]**: Transcrever áudio de banking com números formatados corretamente (ex: "dois mil e vinte e cinco" → "2025") via ITN.
@@ -223,7 +220,7 @@ Transcrição em tempo real via WebSocket com:
 - **[v2] Window de VAD**: 64ms (1024 samples a 16kHz) — acumular 2 frames de 30ms + padding de 4ms para melhor acurácia do Silero VAD.
 - Envio: cliente envia frames de áudio como mensagens binárias WebSocket.
 - **[v2] Tamanho máximo de mensagem WebSocket**: 64KB (equivalente a ~2s de PCM 16kHz mono).
-- **[v2] Tamanho recomendado de frame**: 20ms ou 40ms (padrão de telefonia).
+- **[v2] Tamanho recomendado de frame**: 20ms ou 40ms.
 - Amostra mínima para processamento: 500ms de áudio acumulado.
 
 ### RF-04: Voice Activity Detection (VAD)
@@ -322,7 +319,7 @@ Detecção automática de idioma (se engine suportar) ou seleção explícita vi
 Pipeline de pré-processamento de áudio entre ingestão e VAD/engine. Cada stage é toggleável via config. Construído como componente original do runtime, usando bibliotecas de DSP (soxr, scipy, RNNoise) como dependências.
 
 ```
-Ingestão (WebSocket/RTP) → Resample → DC Remove → Gain Normalize → [Denoise] → VAD → Engine
+Ingestão (WebSocket) → Resample → DC Remove → Gain Normalize → [Denoise] → VAD → Engine
 ```
 
 **Stages:**
@@ -330,9 +327,9 @@ Ingestão (WebSocket/RTP) → Resample → DC Remove → Gain Normalize → [Den
 | Stage | Descrição | Default | Custo |
 |---|---|---|---|
 | **Resample** | Converte qualquer sample rate para 16kHz mono. Usa `soxr` (alta qualidade) ou `scipy.signal.resample_poly` | Ativo | <1ms/frame |
-| **DC Remove** | High-pass filter a 20Hz para remover DC offset de hardware (comum em telefonia) | Ativo | <0.1ms/frame |
+| **DC Remove** | High-pass filter a 20Hz para remover DC offset de hardware | Ativo | <0.1ms/frame |
 | **Gain Normalize** | Normaliza amplitude para range consistente (-3dBFS peak). Essencial para CTC models sensíveis a amplitude | Ativo | <0.1ms/frame |
-| **Denoise** | Noise reduction via RNNoise ou NSNet2. Reduz ruído de fundo antes do VAD e engine | **Desativo** (habilitar para telefonia) | ~1ms/frame CPU |
+| **Denoise** | Noise reduction via RNNoise ou NSNet2. Reduz ruído de fundo antes do VAD e engine | **Desativo** (habilitar para ambientes ruidosos) | ~1ms/frame CPU |
 
 **Total do pipeline**: <5ms por frame em CPU (com denoise habilitado).
 
@@ -344,7 +341,7 @@ preprocessing:
   dc_remove: true
   gain_normalize: true
   target_dbfs: -3.0
-  denoise: false           # habilitar para telefonia
+  denoise: false           # habilitar para ambientes ruidosos
   denoise_engine: rnnoise  # rnnoise | nsnet2
 ```
 
@@ -795,8 +792,6 @@ preprocessing:                   # [v2]
 
 O runtime adapta o comportamento de windowing e partial transcript com base na architecture declarada.
 
-**[v2] Campo `quality.telephony_optimized`**: O registry usa esse campo para recomendar modelos adequados quando o audio source é telefonia (8kHz). Se o modelo não é telephony_optimized e o áudio é 8kHz, o runtime emite warning no log e sugere modelo alternativo (se disponível).
-
 ---
 
 ## 12. Interface de Backend STT
@@ -1084,7 +1079,7 @@ Buffer circular de tamanho fixo que armazena áudio recente da sessão. Componen
 - **[v2] Batch**: suporta `BatchedInferencePipeline` para 2-3x speedup em arquivos.
 - Ideal para: qualidade máxima de transcrição, batch, GPU.
 - **[v2] Nota sobre Distil-Whisper**: Distil-large-v3 é ~6x mais rápido que large-v3 com ~1% de degradação em WER. Recomendado para cenários de streaming onde latência é prioridade sobre accuracy máxima.
-- **[v2] Nota sobre telephony**: Whisper perde ~5-15% de accuracy com áudio 8kHz upsampled. Para telefonia pura, considerar modelos fine-tuned ou backends otimizados para narrowband.
+- **[v2] Nota sobre 8kHz**: Whisper perde ~5-15% de accuracy com áudio 8kHz upsampled. Para áudio narrowband, considerar modelos fine-tuned ou backends otimizados.
 
 ### WeNet (Fase 2)
 
@@ -1102,7 +1097,7 @@ Buffer circular de tamanho fixo que armazena áudio recente da sessão. Componen
 | Batch, qualidade máxima | faster-whisper-large-v3 | Melhor WER geral |
 | Streaming, baixa latência | distil-whisper-large-v3 | 6x mais rápido, ~1% WER gap |
 | Streaming, ultra-baixa latência | WeNet CTC / Paraformer | Partials nativos, <100ms TTFB |
-| Telefonia 8kHz | WeNet telephony / Whisper fine-tuned | Otimizados para narrowband |
+| Narrowband 8kHz | WeNet / Whisper fine-tuned | Otimizados para narrowband |
 | CPU-only | faster-whisper-tiny / WeNet CTC | Modelos leves |
 
 ---
@@ -1135,7 +1130,7 @@ Componente original do runtime Theo. Usa bibliotecas de DSP como dependências, 
 
 **Gain Normalize**: Peak normalization para -3dBFS. Calcula fator de ganho por window de 500ms (não por frame, para evitar pumping). Clipping protection: se qualquer sample exceder 0dBFS após ganho, limitar.
 
-**Denoise**: RNNoise (C com bindings Python via `rnnoise-python`) ou NSNet2 (ONNX). Habilitado apenas quando `preprocessing.denoise: true`. Latência: ~1ms/frame em CPU. Melhora WER significativamente em áudio ruidoso (telefonia, viva-voz).
+**Denoise**: RNNoise (C com bindings Python via `rnnoise-python`) ou NSNet2 (ONNX). Habilitado apenas quando `preprocessing.denoise: true`. Latência: ~1ms/frame em CPU. Melhora WER significativamente em áudio ruidoso (ambientes com ruído de fundo, viva-voz).
 
 ### Configuração global (theo.yaml)
 
@@ -1231,53 +1226,7 @@ Pós-correção baseada em distância de edição. **Implementação própria do
 
 ---
 
-## 18. Ingestão RTP (Fase 3)
-
-### Escopo
-
-**Apenas ingestão de RTP raw.** O SIP signaling é responsabilidade do PBX (Asterisk/FreeSWITCH). Theo recebe o stream de áudio já decodificado.
-
-### Fluxo
-
-```
-Asterisk ──RTP (G.711/PCM)──→ Theo RTP Listener ──→ Codec Decode ──→ Preprocessing ──→ Session Manager
-```
-
-### Componente: RTP Listener
-
-Componente original do runtime Theo:
-
-- Recebe pacotes UDP com payload RTP.
-- Extrai áudio, aplica jitter buffer (20ms, configurável).
-- Decodifica G.711 μ-law/A-law para PCM 16-bit.
-- **[v2] Nota de qualidade**: G.711 é 8kHz, 8-bit. O Audio Preprocessing Pipeline faz upsample para 16kHz automaticamente, mas a qualidade é limitada a 4kHz de bandwidth. O runtime deve sinalizar `audio_quality: telephony` ao registry para selecionar modelos otimizados.
-- Alimenta Audio Preprocessing Pipeline (que faz resample, normalize, etc.).
-
-### O que NÃO faz
-
-- SIP INVITE/BYE (Asterisk gerencia).
-- Echo cancellation (Asterisk gerencia).
-- DTMF detection (Asterisk gerencia).
-- Media negotiation (Asterisk gerencia).
-
-### [v2] Echo Cancellation — Requirement de Integração
-
-**Problema**: Em cenários full-duplex (STT + TTS simultâneos), o microfone captura o áudio do TTS. Sem echo cancellation, o STT transcreve o que o bot disse.
-
-**Decisão**: AEC é responsabilidade do PBX (Asterisk/FreeSWITCH), NÃO do Theo. Porém, isso deve ser explicitamente documentado como **requirement de integração**.
-
-**Requirements para Asterisk:**
-
-1. `TALK_DETECT` habilitado no dialplan para detectar barge-in.
-2. Echo cancellation habilitado no channel driver (PJSIP: `echo_cancel=yes`, `echo_cancel_tail_length=200`).
-3. Se usando confbridge/MixMonitor, garantir que o áudio enviado ao Theo via RTP é o áudio do caller **apenas** (sem mix com TTS output).
-4. Alternativa: enviar reference signal (TTS output) como segundo stream RTP para que o Theo possa fazer reference subtraction. Isso é um **extensão opcional da Fase 3+**.
-
-**Fallback sem AEC**: Se AEC não está disponível, o runtime pode usar **mute-on-speak**: pausar ingestão STT enquanto TTS está ativo na mesma sessão. Simples mas elimina barge-in.
-
----
-
-## 19. Roadmap
+## 18. Roadmap
 
 ### Fase 1 — STT Batch + Preprocessing (6 semanas)
 
@@ -1321,20 +1270,16 @@ Componente original do runtime Theo:
 
 **Critério de sucesso**: sessão WebSocket de 30 minutos sem degradação de latência, com recovery de falha de worker sem duplicação de segmentos.
 
-### Fase 3 — Telefonia + Scheduler Avançado (8 semanas)
+### Fase 3 — Escala + Full-Duplex (6 semanas)
 
 **Entregáveis:**
 
-- RTP Listener (componente original) com jitter buffer e decode G.711.
-- **[v2] Preprocessing automático**: detect 8kHz, upsample, denoise habilitado por default para RTP.
-- **[v2] Audio quality tagging**: sinalizar `audio_quality: telephony` ao registry.
-- Integração testada com Asterisk (receber áudio de chamada, transcrever em tempo real).
-- **[v2] Documentação de integration requirements**: AEC, TALK_DETECT, channel isolation.
-- **[v2] Mute-on-speak fallback** para cenários sem AEC.
-- Scheduler com priorização: realtime (WebSocket/RTP) > batch (file upload).
+- Scheduler com priorização: realtime (WebSocket) > batch (file upload).
 - Orçamento de latência por sessão no scheduler.
-- Co-scheduling STT + TTS (para agentes full-duplex).
+- Cancelamento em ≤50ms via gRPC.
 - **[v2] Dynamic batching** no worker (estilo Triton): acumula requests, batch inference, distribui.
+- Co-scheduling STT + TTS (para agentes full-duplex).
+- **Mute-on-speak**: pausar ingestão STT enquanto TTS está ativo na mesma sessão.
 
 ---
 
@@ -1384,7 +1329,6 @@ Componente original do runtime Theo:
 - Post-Processing Pipeline (ITN orchestration, Entity Formatting, Hot Word Correction)
 - Ring Buffer com read fence e force commit
 - LocalAgreement para partial transcripts (inspirado no conceito, implementação própria)
-- RTP Listener com jitter buffer
 - CLI (`theo pull`, `theo serve`, `theo transcribe`, etc.)
 - Protocolo gRPC de comunicação runtime ↔ worker
 - Protocolo de eventos WebSocket para streaming
@@ -1532,29 +1476,7 @@ Solução: WAL in-memory com `last_committed_segment_id`, `last_committed_buffer
 
 ---
 
-### ADR-007 — Escopo de Telefonia: Apenas RTP Raw (com AEC requirements)
-
-**Status:** Aceito (estendido v2)
-
-**Decisão:** Na Fase 3, Theo implementa apenas ingestão RTP raw. SIP signaling fica fora. **[v2] AEC é responsabilidade do PBX, documentado como integration requirement.**
-
-**Justificativa original:**
-
-- SIP é um protocolo complexo. Implementar é um projeto em si.
-- Asterisk/FreeSWITCH já resolvem SIP de forma madura.
-- Focar em RTP raw mantém escopo controlável e testável.
-
-**[v2] AEC decision:**
-
-- AEC é essencial para full-duplex (STT + TTS simultâneos).
-- Implementar AEC no Theo adicionaria complexidade significativa (speexdsp, referência de TTS, latência).
-- Asterisk já tem AEC no channel driver (PJSIP).
-- **Decisão: documentar como requirement**, não implementar.
-- **Fallback: mute-on-speak** para cenários sem AEC (sacrifica barge-in).
-
----
-
-### ADR-008 [v2] — Audio Preprocessing no Runtime
+### ADR-007 [v2] — Audio Preprocessing no Runtime
 
 **Status:** Aceito
 
@@ -1563,7 +1485,7 @@ Solução: WAL in-memory com `last_committed_segment_id`, `last_committed_buffer
 **Justificativa:**
 
 - Engines esperam input normalizado (PCM 16-bit, 16kHz, mono).
-- Clientes enviam áudio em qualquer formato (8kHz telefonia, 44.1kHz desktop, 48kHz WebRTC).
+- Clientes enviam áudio em qualquer formato (8kHz, 44.1kHz desktop, 48kHz WebRTC).
 - Sem preprocessing, cada engine implementaria (ou não) sua própria normalização, resultando em comportamento inconsistente.
 - CTC models são especialmente sensíveis a amplitude — gain normalize é essencial.
 - Denoise antes do VAD reduz falsos positivos significativamente.
@@ -1573,7 +1495,7 @@ Solução: WAL in-memory com `last_committed_segment_id`, `last_committed_buffer
 
 ---
 
-### ADR-009 [v2] — LocalAgreement para Partial Transcripts
+### ADR-008 [v2] — LocalAgreement para Partial Transcripts
 
 **Status:** Aceito
 
@@ -1598,7 +1520,7 @@ Solução: WAL in-memory com `last_committed_segment_id`, `last_committed_buffer
 
 ---
 
-### ADR-010 [v2] — Post-Processing Pipeline Plugável
+### ADR-009 [v2] — Post-Processing Pipeline Plugável
 
 **Status:** Aceito
 
@@ -1628,7 +1550,6 @@ Theo OpenVoice STT v2.1 é um runtime de voz **construído do zero**, com a vis�
 - Audio Preprocessing Pipeline e Post-Processing Pipeline
 - Ring Buffer com read fence, WAL in-memory, force commit
 - LocalAgreement para partial transcripts (conceito inspirado no whisper-streaming)
-- RTP Listener para ingestão de telefonia
 - CLI unificado (padrão inspirado no Ollama)
 - Protocolo gRPC runtime ↔ worker e protocolo WebSocket de streaming
 - Métricas de qualidade e observabilidade
