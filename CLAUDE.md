@@ -2,7 +2,7 @@
 
 Runtime unificado de voz (STT + TTS) construido do zero em Python. Orquestra engines de inferencia (Faster-Whisper, Silero VAD, Kokoro, Piper) com API OpenAI-compatible.
 
-**Status: Fase 1 do PRD 100% entregue.** M1 (Foundation), M2 (Worker gRPC), M3 (API Batch), M4 (Pipelines) completos. 400 testes passando. Proximo: M5 (WebSocket + VAD).
+**Status: Fase 2 Core do PRD entregue.** M1 (Foundation), M2 (Worker gRPC), M3 (API Batch), M4 (Pipelines), M5 (WebSocket + VAD), M6 (Session Manager) completos. 1038 testes passando. Proximo: M7 (Segundo Backend - WeNet).
 
 ## Commands
 
@@ -25,13 +25,15 @@ make proto              # generate protobuf stubs
 ```
 src/theo/
 ├── server/           # FastAPI — endpoints REST + WebSocket
-│   └── routes/       # transcriptions, translations, health
+│   └── routes/       # transcriptions, translations, health, realtime
 ├── scheduler/        # Request routing and prioritization
 ├── registry/         # Model Registry (theo.yaml, lifecycle)
 ├── workers/          # Subprocess gRPC management
 │   └── stt/          # STTBackend interface + FasterWhisperBackend
 ├── preprocessing/    # Audio pipeline (resample, DC remove, gain normalize)
 ├── postprocessing/   # Text pipeline (ITN via NeMo, fail-open)
+├── vad/              # Voice Activity Detection (energy pre-filter + Silero)
+├── session/          # Session Manager (state machine, ring buffer, WAL, recovery, backpressure, metrics)
 ├── cli/              # CLI commands (click)
 └── proto/            # gRPC protobuf definitions
 ```
@@ -82,6 +84,10 @@ ADRs completos: @docs/PRD.md (secao "Architecture Decision Records")
 - **Session Manager e so STT.** TTS e stateless por request. Nao tentar reusar Session Manager para TTS.
 - **LocalAgreement e para encoder-decoder apenas.** CTC e streaming-native tem partials nativos — nao aplicar LocalAgreement neles.
 - **Manifest `type` field** e normalizado para `model_type` no `ModelManifest` (evita conflito com built-in Python).
+- **Force commit e assincrono.** O RingBuffer callback `on_force_commit` e sincrono (chamado de `write()`), mas seta um flag `_force_commit_pending` que `process_frame()` (async) verifica. Nunca bloquear a escrita de novos frames dentro do callback.
+- **SessionStateMachine e frozen.** Transicoes invalidas levantam `InvalidTransitionError`. Estado CLOSED e terminal — nenhuma transicao permitida depois.
+- **WAL checkpoint e monotonic.** Usa `time.monotonic()` para timestamps, nunca `time.time()`. Garante consistencia mesmo com ajustes de relogio.
+- **Recovery reenvia uncommitted data.** Apos crash do worker, `recover()` reenvia `ring_buffer.get_uncommitted()` ao novo stream. Nao duplica dados ja commitados gracas ao read fence.
 
 ## Workflow
 

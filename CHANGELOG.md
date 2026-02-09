@@ -8,6 +8,51 @@ e este projeto adere ao [Versionamento Semantico](https://semver.org/lang/pt-BR/
 ## [Unreleased]
 
 ### Added
+- `SessionStateMachine` com 6 estados (INIT, ACTIVE, SILENCE, HOLD, CLOSING, CLOSED), transicoes validas, timeouts configuraveis e callbacks on_enter/on_exit (#M6-01)
+- `SessionTimeouts` dataclass com defaults do PRD (INIT: 30s, SILENCE: 30s, HOLD: 5min, CLOSING: 2s) e validacao de timeout minimo de 1s (#M6-02)
+- Funcao `timeouts_from_configure_command()` para converter campos do `SessionConfigureCommand` (ms) para `SessionTimeouts` (s) (#M6-02)
+- `RingBuffer` com array pre-alocado de 60s, ponteiros circulares read/write, read fence e force commit em 90% de capacidade (#M6-04)
+- Metodos `check_timeout()` e `update_session_timeouts()` no `StreamingSession` para verificacao periodica de timeouts da state machine (#M6-03)
+- Property `session_state` no `StreamingSession` expondo estado atual da maquina de estados (#M6-03)
+- Emissao de `SessionHoldEvent` com `hold_timeout_ms` correto quando sessao transita para HOLD (#M6-03)
+- 21 testes de integracao em `test_session_state_integration.py` cobrindo transicoes, timeouts, comportamento por estado e emissao de eventos (#M6-03)
+- Integracao do Ring Buffer no `StreamingSession`: frames preprocessados escritos no buffer, read fence avanca em transcript.final, force commit automatico quando buffer >90% cheio (#M6-05)
+- 32 testes em `test_ring_buffer_fence.py` cobrindo read fence, commit, uncommitted bytes, write protection, force commit callback e integracao StreamingSession + Ring Buffer (#M6-05)
+- `SessionWAL` (Write-Ahead Log in-memory) com `WALCheckpoint` frozen dataclass para recovery de sessao sem duplicacao apos crash de worker (#M6-06)
+- Integracao do WAL no `StreamingSession`: checkpoint registrado automaticamente apos cada transcript.final com segment_id, buffer_offset e timestamp monotonic (#M6-06)
+- Property `wal` no `StreamingSession` para acesso ao WAL pela logica de recovery (#M6-06)
+- 17 testes em `test_session_wal.py` cobrindo inicializacao, record/overwrite de checkpoints, imutabilidade do WALCheckpoint e integracao StreamingSession + WAL (#M6-06)
+- `LocalAgreementPolicy` para confirmacao de partial transcripts em engines encoder-decoder via comparacao posicional entre passes consecutivas (#M6-08)
+- `AgreementResult` dataclass imutavel com tokens confirmados, retidos e flag de nova confirmacao (#M6-08)
+- 27 testes em `test_local_agreement.py` cobrindo agreement basico, crescimento monotonico, flush, reset, min_confirm_passes, edge cases e imutabilidade (#M6-08)
+- `CrossSegmentContext` para continuidade entre segmentos de fala via initial_prompt com ultimos 224 tokens do transcript.final anterior (#M6-09)
+- Integracao do CrossSegmentContext no `StreamingSession`: texto pos-processado (ITN) do transcript.final armazenado automaticamente; initial_prompt combina hot words e contexto no primeiro frame de cada segmento (#M6-09)
+- 20 testes em `test_cross_segment_context.py` cobrindo armazenamento, truncamento, reset, integracao com StreamingSession e combinacao de hot words + contexto (#M6-09)
+- Recovery de crash do worker via `StreamingSession.recover()`: reabre stream gRPC com timeout, reenvia dados nao commitados do ring buffer, restaura segment_id do WAL, inicia nova receiver task (#M6-07)
+- Deteccao automatica de `WorkerCrashError` no receiver com emissao de erro recuperavel e tentativa de recovery transparente (#M6-07)
+- 17 testes em `test_session_recovery.py` cobrindo abertura de novo stream, reenvio de uncommitted data, restauracao de segment_id, timeout, prevencao de recursao, integracao receiver+recovery e cenarios de falha (#M6-07)
+- Hot words por sessao via `session.configure`: `StreamingSession` aceita `hot_words` que sao injetados como `initial_prompt` para Whisper no primeiro frame de cada segmento, combinados com cross-segment context (#M6-10)
+- 9 testes em `test_hot_words_session.py` cobrindo injecao de hot words, formatacao de prompt, combinacao com cross-segment context e update via configure (#M6-10)
+- 54 testes de integracao end-to-end em `test_m6_integration.py` cobrindo todos os componentes M6 juntos: state machine + ring buffer + WAL + recovery + cross-segment + hot words + force commit (#M6-11)
+- Metricas Prometheus M6: `theo_stt_session_duration_seconds`, `theo_stt_segments_force_committed_total`, `theo_stt_confidence_avg`, `theo_stt_worker_recoveries_total` (#M6-13)
+- 18 testes em `test_streaming_metrics.py` cobrindo registro de metricas de sessao, force commit, confidence e recovery (#M6-13)
+- Teste de estabilidade de 30 minutos (simulado) com todos os componentes M6: state machine, ring buffer, WAL, cross-segment context, transicoes HOLD, force commit (#M6-15)
+- Teste de force commit durante fala continua de 65s excedendo ring buffer de 60s (#M6-15)
+- 3 testes de integracao de recovery end-to-end em `test_m6_recovery.py`: continuidade de segment_id, recovery com ring buffer vazio, multiplos recoveries na mesma sessao (#M6-16)
+
+### Changed
+- `StreamingSession` agora usa `SessionStateMachine` com 6 estados em vez do estado simplificado ACTIVE/CLOSED de M5 (#M6-03)
+- Estado inicial da sessao agora e INIT (aguardando primeiro audio) em vez de ACTIVE (#M6-03)
+- VAD speech_start transita INIT->ACTIVE, SILENCE->ACTIVE ou HOLD->ACTIVE (#M6-03)
+- VAD speech_end transita ACTIVE->SILENCE (em vez de ser emitido incondicionalmente) (#M6-03)
+- Frames recebidos em HOLD nao sao enviados ao worker gRPC (economia de GPU) (#M6-03)
+- `check_inactivity()` agora delega para `SessionStateMachine.check_timeout()` em vez de usar timer fixo (#M6-03)
+- `close()` agora transita via CLOSING->CLOSED pela state machine (#M6-03)
+
+### Fixed
+- SPEECH_END sem SPEECH_START previo nao emitia evento spurio -- agora e ignorado corretamente quando estado nao e ACTIVE (#M6-03)
+
+### Added
 - Endpoint WebSocket `WS /v1/realtime` com handshake (model, language, session_id) e protocolo de eventos JSON (#M5-T5-02)
 - Pydantic models para 8 tipos de evento servidor e 4 tipos de comando cliente WebSocket (#M5-T5-01)
 - Protocol handler `dispatch_message()` para dispatch tipado de frames binarios e comandos JSON (#M5-T5-03)

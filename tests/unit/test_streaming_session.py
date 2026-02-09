@@ -10,7 +10,7 @@ Testes sao deterministicos — sem dependencia de timing real.
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, Mock
 
 import numpy as np
 
@@ -23,6 +23,7 @@ from theo.server.models.events import (
     VADSpeechEndEvent,
     VADSpeechStartEvent,
 )
+from theo.session.state_machine import SessionStateMachine
 from theo.session.streaming import StreamingSession
 from theo.vad.detector import VADEvent, VADEventType
 
@@ -747,38 +748,64 @@ async def test_worker_crash_emits_error_event():
 
 
 async def test_inactivity_check():
-    """check_inactivity() retorna True apos 60s sem audio."""
-    # Arrange
+    """check_inactivity() retorna True apos timeout de INIT (30s default)."""
+    # Arrange: usar clock controlavel na state machine
+    current_time = [0.0]
+
+    def fake_clock() -> float:
+        return current_time[0]
+
+    sm = SessionStateMachine(clock=fake_clock)
     session, _, _, _, _, _ = _make_session()
+    # Injetar state machine com clock controlavel
+    session._state_machine = sm
 
     # Recentemente criado: nao expirou
     assert not session.check_inactivity()
 
-    # Simular 61s sem audio
-    with patch("theo.session.streaming.time") as mock_time:
-        # last_audio_time foi definido no __init__, simular que 61s passaram
-        mock_time.monotonic.return_value = session._last_audio_time + 61.0
-        assert session.check_inactivity()
+    # Simular 31s sem audio (INIT timeout = 30s -> CLOSED)
+    current_time[0] = 31.0
+    assert session.check_inactivity()
 
 
 async def test_inactivity_reset_on_frame():
-    """process_frame() reseta o timer de inatividade."""
-    # Arrange
-    session, _, _, _, _, _ = _make_session()
+    """process_frame() reseta o timer de inatividade via state machine transition.
 
-    original_time = session._last_audio_time
+    Quando um frame com speech_start e processado, a state machine transita
+    de INIT para ACTIVE (que nao tem timeout), impedindo que check_inactivity()
+    retorne True. Frames em INIT (sem fala) nao resetam o timer da state machine,
+    mas o estado INIT tem timeout de 30s para CLOSED.
+    """
+    # Arrange: usar clock controlavel na state machine
+    current_time = [0.0]
 
-    # Simular passagem de tempo e processar frame
-    with patch("theo.session.streaming.time") as mock_time:
-        mock_time.monotonic.return_value = original_time + 30.0
-        await session.process_frame(_make_raw_bytes())
-        # Apos process_frame, _last_audio_time deve ser atualizado
-        assert session._last_audio_time == original_time + 30.0
+    def fake_clock() -> float:
+        return current_time[0]
 
-        # Verificar que nao expirou (30s < 60s)
-        mock_time.monotonic.return_value = original_time + 80.0
-        # 80 - 30 = 50s desde ultimo frame, < 60s
-        assert not session.check_inactivity()
+    sm = SessionStateMachine(clock=fake_clock)
+    session, _, vad, _, _, _ = _make_session()
+    session._state_machine = sm
+
+    # Verificar que em INIT com 25s passados, nao expirou
+    current_time[0] = 25.0
+    assert not session.check_inactivity()
+
+    # Simular speech_start -> transita para ACTIVE (sem timeout)
+    vad.process_frame.return_value = VADEvent(
+        type=VADEventType.SPEECH_START,
+        timestamp_ms=1000,
+    )
+    vad.is_speaking = True
+    current_time[0] = 26.0
+    await session.process_frame(_make_raw_bytes())
+    await asyncio.sleep(0.01)
+
+    # ACTIVE nao tem timeout, logo check_inactivity retorna False
+    current_time[0] = 200.0
+    assert not session.check_inactivity()
+
+    # Cleanup
+    await session.close()
 
 
 async def test_word_timestamps_in_final():

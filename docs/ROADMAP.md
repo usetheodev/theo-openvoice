@@ -28,7 +28,7 @@ O PRD define 3 fases de produto. Este roadmap decompoe essas fases em **10 miles
 ```
 PRD Fase 1 (STT Batch) ✅       PRD Fase 2 (Streaming)          PRD Fase 3 (Telefonia)
 ├── M1: Fundacao ✅             ├── M5: WebSocket + VAD ✅      ├── M8: RTP Listener
-├── M2: Worker gRPC ✅          ├── M6: Session Manager         ├── M9: Scheduler Avancado
+├── M2: Worker gRPC ✅          ├── M6: Session Manager ✅      ├── M9: Scheduler Avancado
 ├── M3: API Batch ✅            ├── M7: Segundo Backend         └── M10: Full-Duplex
 └── M4: Pipelines ✅
 ```
@@ -386,10 +386,11 @@ Validacao:
 
 ---
 
-### M6 -- Session Manager + Ring Buffer
+### M6 -- Session Manager + Ring Buffer ✅
 
 **Tema**: T3 -- Streaming em Tempo Real
 **Esforco**: G (4-6 semanas)
+**Status**: **Concluido** (2026-02-09)
 **Dependencias**: M5 (WebSocket + VAD funcional)
 
 **Descricao**: Implementar o Session Manager com maquina de estados completa (6 estados), Ring Buffer com read fence e force commit, WAL in-memory para recovery, e LocalAgreement para partial transcripts de encoder-decoder. Este e o componente mais original do Theo -- nao existe equivalente em nenhum projeto open-source de STT.
@@ -429,6 +430,8 @@ Validacao:
 | Race condition no WAL durante crash recovery | Media | Alto | WAL e escrita atomica (um registro por vez); testar com chaos engineering (kill -9 aleatorio) |
 | Ring buffer force commit interrompe fala no meio de uma frase | Baixa | Medio | 60s de buffer e suficiente para 99%+ dos segmentos; monitorar `segments_force_committed_total` |
 | Maquina de estados com transicoes invalidas em edge cases | Media | Alto | Testar todas as transicoes possíveis (inclusive invalidas); estado CLOSED e terminal e imutavel |
+
+**Resultado**: Todos os criterios atingidos. 15/15 entregaveis completos. `SessionStateMachine` com 6 estados (INIT, ACTIVE, SILENCE, HOLD, CLOSING, CLOSED), transicoes validas, timeouts configuraveis (INIT: 30s, SILENCE: 30s, HOLD: 5min, CLOSING: 2s) e callbacks on_enter/on_exit. `SessionTimeouts` dataclass com validacao de minimo 1s e conversao de `SessionConfigureCommand`. `RingBuffer` com `bytearray` pre-alocado de 60s (1.9MB), ponteiros circulares, read fence (`last_committed_offset`) e force commit callback em 90% de capacidade. `SessionWAL` (Write-Ahead Log in-memory) com `WALCheckpoint` frozen dataclass para recovery sem duplicacao. Recovery de crash via `StreamingSession.recover()`: reabre stream gRPC, reenvia uncommitted data do ring buffer, restaura segment_id do WAL. `LocalAgreementPolicy` para confirmacao de partial transcripts via comparacao posicional entre passes consecutivas com `min_confirm_passes` configuravel. `CrossSegmentContext` com ultimos 224 tokens do transcript.final como initial_prompt do proximo segmento. Hot words por sessao injetados via initial_prompt combinados com cross-segment context. Metricas Prometheus M6: session_duration_seconds, segments_force_committed_total, confidence_avg, worker_recoveries_total. Teste de estabilidade de 30 minutos (simulado) com todos os componentes M6 sem degradacao de latencia nem crescimento de memoria >10MB. Teste de recovery end-to-end com multiplos crashes e preservacao de segment_id. Decomposicao conforme perspectiva Sofia: SessionStateMachine, RingBuffer, LocalAgreementPolicy, SessionWAL, CrossSegmentContext -- cada um testavel isoladamente. 295 testes novos (total: 1038 testes). mypy strict sem erros, ruff limpo, CI verde.
 
 **Perspectiva Sofia (Arquitetura)**: O Session Manager e o coracao do Theo. Ele orquestra VAD, Ring Buffer, LocalAgreement, WAL e comunicacao com o worker. A tentacao e fazer God class. Resistir. Decompor em: SessionStateMachine (transicoes), RingBuffer (dados), LocalAgreementPolicy (partials), SessionRecovery (WAL + retomada). Cada um testavel isoladamente.
 

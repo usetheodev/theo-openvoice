@@ -4,11 +4,17 @@ Metricas sao opcionais: se prometheus_client nao estiver instalado,
 o modulo exporta None para cada metrica e o codigo consumidor deve
 verificar antes de usar.
 
-Metricas definidas:
+Metricas definidas (M5):
 - theo_stt_ttfb_seconds: Time to First Byte (primeiro partial/final apos speech start)
 - theo_stt_final_delay_seconds: Delay do final transcript apos fim de fala
 - theo_stt_active_sessions: Gauge de sessoes WebSocket ativas
 - theo_stt_vad_events_total: Counter de eventos VAD por tipo (speech_start, speech_end)
+
+Metricas adicionadas (M6):
+- theo_stt_session_duration_seconds: Duracao total de sessoes encerradas
+- theo_stt_segments_force_committed_total: Segmentos com force commit (ring buffer >90%)
+- theo_stt_confidence_avg: Histograma de confidence dos transcript.final
+- theo_stt_worker_recoveries_total: Counter de recovery attempts por resultado
 """
 
 from __future__ import annotations
@@ -46,6 +52,31 @@ try:
         ["event_type"],
     )
 
+    # M6 metrics
+
+    stt_session_duration_seconds: Histogram | None = _Histogram(
+        "theo_stt_session_duration_seconds",
+        "Total duration of completed streaming sessions",
+        buckets=(1, 5, 10, 30, 60, 120, 300, 600, 1800),
+    )
+
+    stt_segments_force_committed_total: Counter | None = _Counter(
+        "theo_stt_segments_force_committed_total",
+        "Segments force committed due to ring buffer exceeding 90% capacity",
+    )
+
+    stt_confidence_avg: Histogram | None = _Histogram(
+        "theo_stt_confidence_avg",
+        "Confidence scores of final transcripts (proxy for WER)",
+        buckets=(0.5, 0.6, 0.7, 0.8, 0.85, 0.9, 0.95, 0.99),
+    )
+
+    stt_worker_recoveries_total: Counter | None = _Counter(
+        "theo_stt_worker_recoveries_total",
+        "Worker crash recovery attempts by result",
+        ["result"],
+    )
+
     HAS_METRICS = True
 
 except ImportError:
@@ -53,5 +84,9 @@ except ImportError:
     stt_final_delay_seconds = None
     stt_active_sessions = None
     stt_vad_events_total = None
+    stt_session_duration_seconds = None
+    stt_segments_force_committed_total = None
+    stt_confidence_avg = None
+    stt_worker_recoveries_total = None
 
     HAS_METRICS = False

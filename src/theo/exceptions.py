@@ -18,6 +18,8 @@ Hierarquia:
     +-- SessionError
     |   +-- SessionNotFoundError
     |   +-- SessionClosedError
+    |   +-- InvalidTransitionError
+    |   +-- BufferOverrunError
     +-- InvalidRequestError
 """
 
@@ -161,6 +163,19 @@ class SessionClosedError(SessionError):
     def __init__(self, session_id: str) -> None:
         self.session_id = session_id
         super().__init__(f"Sessao '{session_id}' ja esta fechada")
+
+
+class InvalidTransitionError(SessionError):
+    """Transicao de estado invalida na maquina de estados da sessao."""
+
+    def __init__(self, from_state: str, to_state: str) -> None:
+        self.from_state = from_state
+        self.to_state = to_state
+        super().__init__(f"Transicao invalida: {from_state} -> {to_state}")
+
+
+class BufferOverrunError(SessionError):
+    """Tentativa de leitura de dados ja sobrescritos ou alem do escrito no ring buffer."""
 
 
 # --- Request ---

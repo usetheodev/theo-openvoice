@@ -587,6 +587,10 @@ async def test_session_works_without_prometheus():
         patch("theo.session.streaming.stt_vad_events_total", None),
         patch("theo.session.streaming.stt_ttfb_seconds", None),
         patch("theo.session.streaming.stt_final_delay_seconds", None),
+        patch("theo.session.streaming.stt_session_duration_seconds", None),
+        patch("theo.session.streaming.stt_segments_force_committed_total", None),
+        patch("theo.session.streaming.stt_confidence_avg", None),
+        patch("theo.session.streaming.stt_worker_recoveries_total", None),
     ):
         vad = _make_vad_mock()
         stream_handle = _make_stream_handle_mock()
@@ -641,10 +645,16 @@ async def test_metrics_objects_are_not_none():
     """Quando prometheus_client esta instalado, metricas nao sao None."""
     from theo.session import metrics as metrics_mod
 
+    # M5 metrics
     assert metrics_mod.stt_active_sessions is not None
     assert metrics_mod.stt_final_delay_seconds is not None
     assert metrics_mod.stt_ttfb_seconds is not None
     assert metrics_mod.stt_vad_events_total is not None
+    # M6 metrics
+    assert metrics_mod.stt_session_duration_seconds is not None
+    assert metrics_mod.stt_segments_force_committed_total is not None
+    assert metrics_mod.stt_confidence_avg is not None
+    assert metrics_mod.stt_worker_recoveries_total is not None
 
 
 # ---------------------------------------------------------------------------
@@ -719,4 +729,243 @@ async def test_ttfb_recorded_per_segment_across_segments():
     assert current_count == initial_count + 2
 
     # Cleanup
+    await session.close()
+
+
+# ---------------------------------------------------------------------------
+# Tests: M6 Metrics — Session Duration
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(not _HAS_PROMETHEUS, reason="prometheus_client not installed")
+async def test_session_duration_recorded_on_close():
+    """session_duration_seconds e registrado quando sessao e fechada."""
+    initial_count = _get_histogram_count("theo_stt_session_duration_seconds")
+
+    session, _, _, _ = _make_session(session_id="duration_test")
+
+    # Act
+    await session.close()
+
+    # Assert: duracao registrada
+    current_count = _get_histogram_count("theo_stt_session_duration_seconds")
+    assert current_count == initial_count + 1
+
+    # Sum deve ter aumentado (duracao > 0)
+    current_sum = _get_histogram_sum("theo_stt_session_duration_seconds")
+    assert current_sum > 0
+
+
+@pytest.mark.skipif(not _HAS_PROMETHEUS, reason="prometheus_client not installed")
+async def test_session_duration_not_recorded_twice_on_double_close():
+    """session_duration_seconds registrado apenas 1x mesmo com close() duplo."""
+    initial_count = _get_histogram_count("theo_stt_session_duration_seconds")
+
+    session, _, _, _ = _make_session(session_id="duration_double_test")
+
+    await session.close()
+    await session.close()
+
+    current_count = _get_histogram_count("theo_stt_session_duration_seconds")
+    assert current_count == initial_count + 1
+
+
+# ---------------------------------------------------------------------------
+# Tests: M6 Metrics — Confidence Average
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(not _HAS_PROMETHEUS, reason="prometheus_client not installed")
+async def test_confidence_recorded_on_final_transcript():
+    """confidence_avg e registrado quando transcript.final com confidence chega."""
+    final_seg = TranscriptSegment(
+        text="ola mundo",
+        is_final=True,
+        segment_id=0,
+        start_ms=1000,
+        end_ms=2000,
+        language="pt",
+        confidence=0.92,
+    )
+
+    vad = _make_vad_mock()
+    stream_handle = _make_stream_handle_mock(events=[final_seg])
+    initial_count = _get_histogram_count("theo_stt_confidence_avg")
+
+    session, _, _, _on_event = _make_session(
+        vad=vad,
+        stream_handle=stream_handle,
+        session_id="confidence_test",
+    )
+
+    # Trigger speech_start -> receiver task processa final
+    vad.process_frame.return_value = VADEvent(
+        type=VADEventType.SPEECH_START,
+        timestamp_ms=1000,
+    )
+    vad.is_speaking = False
+    await session.process_frame(_make_raw_bytes())
+    await asyncio.sleep(0.05)
+
+    # Assert: confidence registrado
+    current_count = _get_histogram_count("theo_stt_confidence_avg")
+    assert current_count == initial_count + 1
+
+    await session.close()
+
+
+@pytest.mark.skipif(not _HAS_PROMETHEUS, reason="prometheus_client not installed")
+async def test_confidence_not_recorded_when_none():
+    """confidence_avg NAO e registrado quando segment.confidence e None."""
+    final_seg = TranscriptSegment(
+        text="ola",
+        is_final=True,
+        segment_id=0,
+        start_ms=1000,
+        end_ms=2000,
+        confidence=None,  # sem confidence
+    )
+
+    vad = _make_vad_mock()
+    stream_handle = _make_stream_handle_mock(events=[final_seg])
+    initial_count = _get_histogram_count("theo_stt_confidence_avg")
+
+    session, _, _, _ = _make_session(
+        vad=vad,
+        stream_handle=stream_handle,
+        session_id="no_confidence_test",
+    )
+
+    vad.process_frame.return_value = VADEvent(
+        type=VADEventType.SPEECH_START,
+        timestamp_ms=1000,
+    )
+    vad.is_speaking = False
+    await session.process_frame(_make_raw_bytes())
+    await asyncio.sleep(0.05)
+
+    # Assert: confidence NAO registrado
+    current_count = _get_histogram_count("theo_stt_confidence_avg")
+    assert current_count == initial_count
+
+    await session.close()
+
+
+# ---------------------------------------------------------------------------
+# Tests: M6 Metrics — Force Committed Segments
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(not _HAS_PROMETHEUS, reason="prometheus_client not installed")
+async def test_force_commit_counter_increments():
+    """segments_force_committed_total incrementa no callback do ring buffer."""
+    from theo.session.ring_buffer import RingBuffer
+
+    initial_count = _get_counter_value(
+        "theo_stt_segments_force_committed",
+        {},
+    )
+
+    vad = _make_vad_mock()
+    stream_handle = _make_stream_handle_mock()
+
+    # Criar ring buffer de 1s — 16000 * 2 = 32000 bytes.
+    # Cada frame = 1024 * 2 = 2048 bytes, 90% = ~28800 bytes = ~14 frames.
+    # Force commit callback dispara quando uncommitted > 90% da capacity.
+    rb = RingBuffer(duration_s=1.0, sample_rate=16000, bytes_per_sample=2)
+
+    session = StreamingSession(
+        session_id="force_commit_metric_test",
+        preprocessor=_make_preprocessor_mock(),
+        vad=vad,
+        grpc_client=_make_grpc_client_mock(stream_handle),
+        postprocessor=_make_postprocessor_mock(),
+        on_event=_make_on_event(),
+        ring_buffer=rb,
+    )
+
+    # Trigger speech_start
+    vad.process_frame.return_value = VADEvent(
+        type=VADEventType.SPEECH_START,
+        timestamp_ms=1000,
+    )
+    vad.is_speaking = True
+    await session.process_frame(_make_raw_bytes())
+
+    # Enviar frames para atingir >90% de uncommitted data.
+    # A 90% o callback dispara e seta flag -> process_frame chama commit()
+    # que avanca o fence liberando espaco para mais writes.
+    vad.process_frame.return_value = None
+    for _ in range(14):
+        await session.process_frame(_make_raw_bytes())
+
+    await asyncio.sleep(0.01)
+
+    # Assert: force commit counter incrementou
+    current_count = _get_counter_value(
+        "theo_stt_segments_force_committed",
+        {},
+    )
+    assert current_count > initial_count
+
+    await session.close()
+
+
+# ---------------------------------------------------------------------------
+# Tests: M6 Metrics — Worker Recoveries
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(not _HAS_PROMETHEUS, reason="prometheus_client not installed")
+async def test_recovery_success_increments_counter():
+    """worker_recoveries_total com result=success incrementa apos recovery."""
+    from theo.exceptions import WorkerCrashError
+
+    initial_success = _get_counter_value(
+        "theo_stt_worker_recoveries",
+        {"result": "success"},
+    )
+
+    vad = _make_vad_mock()
+    # Primeiro stream handle: crash no receive_events
+    crash_handle = _make_stream_handle_mock(events=[WorkerCrashError("w1")])
+    # Segundo stream handle: recovery normal (vazio)
+    recovery_handle = _make_stream_handle_mock(events=[])
+
+    grpc_client = AsyncMock()
+    grpc_client.open_stream = AsyncMock(
+        side_effect=[crash_handle, recovery_handle],
+    )
+    grpc_client.close = AsyncMock()
+
+    on_event = _make_on_event()
+
+    session = StreamingSession(
+        session_id="recovery_metric_test",
+        preprocessor=_make_preprocessor_mock(),
+        vad=vad,
+        grpc_client=grpc_client,
+        postprocessor=_make_postprocessor_mock(),
+        on_event=on_event,
+        recovery_timeout_s=5.0,
+    )
+
+    # Trigger speech_start -> crash -> auto-recovery
+    vad.process_frame.return_value = VADEvent(
+        type=VADEventType.SPEECH_START,
+        timestamp_ms=1000,
+    )
+    vad.is_speaking = False
+    await session.process_frame(_make_raw_bytes())
+
+    # Dar tempo para receiver task crashar e recovery executar
+    await asyncio.sleep(0.15)
+
+    # Assert: recovery success counter incrementou
+    current_success = _get_counter_value(
+        "theo_stt_worker_recoveries",
+        {"result": "success"},
+    )
+    assert current_success == initial_success + 1
+
     await session.close()

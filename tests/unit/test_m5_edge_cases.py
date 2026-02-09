@@ -1403,7 +1403,13 @@ class TestStreamingSessionMoreEdgeCases:
     """Mais edge cases do StreamingSession."""
 
     async def test_speech_end_without_stream_handle(self) -> None:
-        """SPEECH_END sem stream handle ativo nao causa crash."""
+        """SPEECH_END sem stream handle ativo nao causa crash.
+
+        Com a state machine integrada (M6-03), um SPEECH_END em estado INIT
+        (sem SPEECH_START previo) e ignorado silenciosamente — a sessao nunca
+        esteve ACTIVE, entao nao ha transicao valida para SILENCE.
+        O importante e que nao causa crash.
+        """
         vad = _make_vad_mock()
         on_event = _make_on_event()
 
@@ -1424,11 +1430,12 @@ class TestStreamingSessionMoreEdgeCases:
         vad.is_speaking = False
         await session.process_frame(_make_raw_bytes())
 
-        # Deve emitir speech_end sem crash
+        # Com state machine, SPEECH_END em INIT e ignorado (sem crash).
+        # Nenhum evento speech_end e emitido pois sessao nunca esteve ACTIVE.
         end_calls = [
             call for call in on_event.call_args_list if isinstance(call.args[0], VADSpeechEndEvent)
         ]
-        assert len(end_calls) == 1
+        assert len(end_calls) == 0
 
         await session.close()
 
