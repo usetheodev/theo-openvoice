@@ -2,7 +2,7 @@
 
 Runtime unificado de voz (STT + TTS) construido do zero em Python. Orquestra engines de inferencia (Faster-Whisper, Silero VAD, Kokoro, Piper) com API OpenAI-compatible.
 
-**Status: Fase 2 Core do PRD entregue.** M1 (Foundation), M2 (Worker gRPC), M3 (API Batch), M4 (Pipelines), M5 (WebSocket + VAD), M6 (Session Manager) completos. 1038 testes passando. Proximo: M7 (Segundo Backend - WeNet).
+**Status: Fase 2 Completa do PRD entregue.** M1 (Foundation), M2 (Worker gRPC), M3 (API Batch), M4 (Pipelines), M5 (WebSocket + VAD), M6 (Session Manager), M7 (Segundo Backend - WeNet) completos. 1164 testes passando. Proximo: M8 (RTP Listener).
 
 ## Commands
 
@@ -29,7 +29,7 @@ src/theo/
 ├── scheduler/        # Request routing and prioritization
 ├── registry/         # Model Registry (theo.yaml, lifecycle)
 ├── workers/          # Subprocess gRPC management
-│   └── stt/          # STTBackend interface + FasterWhisperBackend
+│   └── stt/          # STTBackend interface + FasterWhisperBackend + WeNetBackend
 ├── preprocessing/    # Audio pipeline (resample, DC remove, gain normalize)
 ├── postprocessing/   # Text pipeline (ITN via NeMo, fail-open)
 ├── vad/              # Voice Activity Detection (energy pre-filter + Silero)
@@ -50,7 +50,10 @@ PRD: @docs/PRD.md
 - **Preprocessing e post-processing sao responsabilidade do runtime**, nao da engine. Engines recebem PCM 16kHz normalizado e retornam texto cru.
 - **Workers sao subprocessos gRPC** — crash do worker nao derruba o runtime. Recovery via WAL in-memory.
 
+- **Pipeline adaptativo por `architecture`**: `StreamingSession` adapta comportamento automaticamente — encoder-decoder usa LocalAgreement + cross-segment context; CTC usa partials nativos, sem LocalAgreement, sem cross-segment context.
+
 ADRs completos: @docs/PRD.md (secao "Architecture Decision Records")
+Como adicionar nova engine: @docs/ADDING_ENGINE.md
 
 ## Code Style
 
@@ -82,7 +85,8 @@ ADRs completos: @docs/PRD.md (secao "Architecture Decision Records")
 - **Preprocessing vem ANTES do VAD.** O audio deve estar normalizado antes de chegar no Silero VAD, senao os thresholds nao funcionam.
 - **`vad_filter: false` no manifesto.** O VAD e do runtime. Nao habilitar o VAD interno da engine (ex: Faster-Whisper) — duplicaria o trabalho.
 - **Session Manager e so STT.** TTS e stateless por request. Nao tentar reusar Session Manager para TTS.
-- **LocalAgreement e para encoder-decoder apenas.** CTC e streaming-native tem partials nativos — nao aplicar LocalAgreement neles.
+- **LocalAgreement e para encoder-decoder apenas.** CTC e streaming-native tem partials nativos — nao aplicar LocalAgreement neles. O `StreamingSession` faz isso automaticamente via `_architecture` field.
+- **CTC nao usa cross-segment context.** CTC nao suporta `initial_prompt` — `_build_initial_prompt()` retorna `None` para CTC (exceto hot words sem suporte nativo).
 - **Manifest `type` field** e normalizado para `model_type` no `ModelManifest` (evita conflito com built-in Python).
 - **Force commit e assincrono.** O RingBuffer callback `on_force_commit` e sincrono (chamado de `write()`), mas seta um flag `_force_commit_pending` que `process_frame()` (async) verifica. Nunca bloquear a escrita de novos frames dentro do callback.
 - **SessionStateMachine e frozen.** Transicoes invalidas levantam `InvalidTransitionError`. Estado CLOSED e terminal — nenhuma transicao permitida depois.
@@ -93,7 +97,7 @@ ADRs completos: @docs/PRD.md (secao "Architecture Decision Records")
 
 - Ler o PRD (@docs/PRD.md) antes de implementar qualquer componente
 - Consultar a arquitetura (@docs/ARCHITECTURE.md) para entender onde cada peca se encaixa
-- Ao adicionar nova engine STT: implementar `STTBackend` ABC, criar manifesto `theo.yaml`, registrar no Registry. Zero mudancas no runtime core.
+- Ao adicionar nova engine STT: seguir guia em @docs/ADDING_ENGINE.md (5 passos: implementar `STTBackend` ABC, criar manifesto `theo.yaml`, registrar na factory, declarar dependencia, escrever testes). Zero mudancas no runtime core.
 - Ao adicionar novo stage de preprocessing/postprocessing: seguir o padrao pipeline existente (cada stage e toggleavel via config)
 
 ## Environment
@@ -102,7 +106,7 @@ ADRs completos: @docs/PRD.md (secao "Architecture Decision Records")
 - Venv: `.venv/` criado com `uv venv --python 3.12`
 - Todos os comandos devem usar `.venv/bin/` ou `make` targets (que ja usam `.venv/bin/`)
 - CUDA opcional (fallback para CPU transparente)
-- Dependencias pesadas (Faster-Whisper, nemo_text_processing) sao opcionais por engine
+- Dependencias pesadas (Faster-Whisper, WeNet, nemo_text_processing) sao opcionais por engine
 - gRPC tools necessarios para gerar protobufs: `grpcio-tools`
 
 ## API Contracts

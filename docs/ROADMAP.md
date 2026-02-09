@@ -26,10 +26,10 @@ Este documento define a sequencia de implementacao do Theo OpenVoice, organizada
 O PRD define 3 fases de produto. Este roadmap decompoe essas fases em **10 milestones** com granularidade executavel. As fases do PRD sao mantidas como agrupamento logico, mas a unidade de planejamento e o milestone.
 
 ```
-PRD Fase 1 (STT Batch) ✅       PRD Fase 2 (Streaming)          PRD Fase 3 (Telefonia)
+PRD Fase 1 (STT Batch) ✅       PRD Fase 2 (Streaming) ✅       PRD Fase 3 (Telefonia)
 ├── M1: Fundacao ✅             ├── M5: WebSocket + VAD ✅      ├── M8: RTP Listener
 ├── M2: Worker gRPC ✅          ├── M6: Session Manager ✅      ├── M9: Scheduler Avancado
-├── M3: API Batch ✅            ├── M7: Segundo Backend         └── M10: Full-Duplex
+├── M3: API Batch ✅            └── M7: Segundo Backend ✅      └── M10: Full-Duplex
 └── M4: Pipelines ✅
 ```
 
@@ -463,10 +463,11 @@ Validacao:
 
 ---
 
-### M7 -- Segundo Backend STT (WeNet)
+### M7 -- Segundo Backend STT (WeNet) ✅
 
 **Tema**: T4 -- Model-Agnostic
 **Esforco**: M (2-4 semanas)
+**Status**: **Concluido** (2026-02-09)
 **Dependencias**: M6 (Session Manager completo para testar streaming com arquitetura CTC)
 
 **Descricao**: Implementar `WeNetBackend` como segunda implementacao de `STTBackend`, validando que o runtime e verdadeiramente model-agnostic. WeNet usa arquitetura CTC (partials nativos, frame-by-frame), fundamentalmente diferente do Whisper (encoder-decoder, LocalAgreement).
@@ -503,22 +504,30 @@ curl -F file=@audio.wav -F model=wenet-ctc \
 | WeNet tem dependencia de LibTorch que conflita com CTranslate2 (Faster-Whisper) | Media | Medio | Isolamento por subprocess resolve -- cada worker tem suas dependencias |
 | WeNet streaming tem semantica diferente de Whisper (partials nativos vs LocalAgreement) | Certa | Medio | E exatamente o que queremos validar; o pipeline adaptativo deve tratar isso transparentemente |
 
+**Resultado**: Todos os criterios atingidos. 7/7 entregaveis completos. `WeNetBackend` implementando `STTBackend` ABC com arquitetura CTC: transcricao batch via `transcribe_file()` com hot words nativos e streaming via `transcribe_stream()` com partials nativos (minimum 160ms/2560 samples antes do primeiro partial). Manifesto `theo.yaml` com `architecture: ctc`, `hot_words: true`, `initial_prompt: false`. Factory `_create_backend("wenet")` com lazy import. Pipeline adaptativo no `StreamingSession`: CTC usa partials nativos (sem LocalAgreement), nao atualiza cross-segment context, nao injeta initial_prompt. `_build_initial_prompt()` com logica por arquitetura. Hot words via keyword boosting nativo do WeNet (parametro de decoding). Worker WeNet como subprocess gRPC via `--engine wenet`. Testes comparativos de contrato validando eventos identicos entre Whisper e WeNet. Testes de streaming avancados com CTC: sequencia partial->final, WAL checkpoint, ring buffer commit, state machine, backward compatibility encoder-decoder. Documentacao `docs/ADDING_ENGINE.md` com guia de 5 passos, exemplos de codigo, checklist, diagrama ASCII e FAQ (9 perguntas). Secao 4.5.1 "Arquitetura Multi-Engine" no `docs/ARCHITECTURE.md`. Interface `STTBackend` validada com zero mudancas no runtime core — nenhum `if architecture == "ctc"` espalhado, toda adaptacao encapsulada no `StreamingSession`. 126 testes novos (total: 1164 testes). mypy strict sem erros, ruff limpo, CI verde.
+
 **Perspectiva Sofia (Arquitetura)**: Este milestone e um teste de fogo para a interface `STTBackend`. Se funcionar com Whisper (encoder-decoder) E WeNet (CTC) sem mudar o runtime core, a abstracão esta correta. Se precisar de `if architecture == "ctc"` espalhado pelo codigo, a interface precisa evoluir.
 
 ---
 
-### CHECKPOINT: Fase 2 Completa
+### CHECKPOINT: Fase 2 Completa ✅
 
-Apos M7, a Fase 2 do PRD esta entregue:
+Apos M7, a Fase 2 do PRD esta entregue (2026-02-09):
 
 ```
 Validacao:
   [x] Tudo de M6 +
-  [x] Segundo backend (WeNet CTC) funcional
-  [x] Pipeline adaptativo por arquitetura validado
+  [x] Segundo backend (WeNet CTC) funcional (batch + streaming)
+  [x] Pipeline adaptativo por arquitetura validado (CTC vs encoder-decoder)
   [x] Model-agnostic confirmado (mesmo contrato, engines diferentes)
-  [x] Documentacao de como adicionar nova engine
+  [x] Hot words: keyword boosting nativo (WeNet) + initial_prompt (Whisper)
+  [x] Interface STTBackend validada com zero mudancas no runtime core
+  [x] Documentacao de como adicionar nova engine (docs/ADDING_ENGINE.md)
+  [x] Secao multi-engine no docs/ARCHITECTURE.md
+  [x] 1164 testes, mypy strict, ruff limpo
 ```
+
+**O que um usuario pode fazer**: Tudo de M6 + trocar engine STT (Whisper -> WeNet) sem mudar codigo cliente. O runtime adapta pipeline por arquitetura automaticamente: encoder-decoder usa LocalAgreement + cross-segment context; CTC usa partials nativos. Mesmo contrato de API, mesmos eventos WebSocket, engines fundamentalmente diferentes. Adicionar nova engine STT seguindo o guia de 5 passos em `docs/ADDING_ENGINE.md`.
 
 ---
 
@@ -697,7 +706,7 @@ O caminho critico principal vai de M1 a M7 (entrega completa de STT model-agnost
 | M3 -- API Batch ✅ | M (2-4 sem) | 5-10 sem |
 | M4 -- Pipelines ✅ | M (2-4 sem) | 7-14 sem |
 | M5 -- WebSocket + VAD ✅ | G (4-6 sem) | 11-20 sem |
-| M6 -- Session Manager | G (4-6 sem) | 15-26 sem |
+| M6 -- Session Manager ✅ | G (4-6 sem) | 15-26 sem |
 | M7 -- Segundo Backend | M (2-4 sem) | 17-30 sem |
 | M8 -- RTP Listener | M (2-4 sem) | 19-34 sem |
 | M9 -- Scheduler | M (2-4 sem) | 21-38 sem |

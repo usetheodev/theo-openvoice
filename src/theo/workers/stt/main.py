@@ -38,6 +38,11 @@ def _create_backend(engine: str) -> STTBackend:
 
         return FasterWhisperBackend()
 
+    if engine == "wenet":
+        from theo.workers.stt.wenet import WeNetBackend
+
+        return WeNetBackend()
+
     msg = f"Engine STT nao suportada: {engine}"
     raise ValueError(msg)
 

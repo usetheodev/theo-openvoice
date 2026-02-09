@@ -8,6 +8,21 @@ e este projeto adere ao [Versionamento Semantico](https://semver.org/lang/pt-BR/
 ## [Unreleased]
 
 ### Added
+- `WeNetBackend` implementando `STTBackend` ABC para engine WeNet com arquitetura CTC: transcricao batch via `transcribe_file()` e streaming via `transcribe_stream()` com partials nativos (#M7-01, #M7-02)
+- Manifesto `theo.yaml` para WeNet CTC com `architecture: ctc`, `hot_words: true`, `initial_prompt: false`, `word_timestamps: true` (#M7-03)
+- Registro do WeNet na factory `_create_backend()` com lazy import para evitar dependencia obrigatoria de `wenet` (#M7-03)
+- Flag `--engine wenet` no CLI do worker STT para iniciar subprocess com WeNetBackend (#M7-06)
+- Hot words via keyword boosting nativo do WeNet: `WeNetBackend` passa hot words como parametro de decoding (#M7-04)
+- Pipeline adaptativo por arquitetura no `StreamingSession`: CTC usa partials nativos (sem LocalAgreement), nao atualiza cross-segment context, nao injeta initial_prompt (#M7-05)
+- Metodo `_build_initial_prompt()` no `StreamingSession` com logica por arquitetura: encoder-decoder usa context + hot words; CTC usa apenas hot words sem suporte nativo (#M7-05)
+- Testes comparativos de contrato: mesma sessao WebSocket com Whisper e WeNet produz eventos identicos (`transcript.partial`, `transcript.final`, `session.created`, `session.closed`) (#M7-07)
+- Testes de streaming avancados com CTC: sequencia partial->final, WAL checkpoint, ring buffer commit, state machine funcional com arquitetura CTC (#M7-08)
+- Fixture `valid_stt_wenet_manifest_path` no `conftest.py` para testes que usam manifesto WeNet (#M7-03)
+- Dependencia opcional `wenet` no `pyproject.toml`: `pip install theo-openvoice[wenet]` (#M7-10)
+- Documentacao `docs/ADDING_ENGINE.md` com guia de 5 passos para adicionar nova engine STT, exemplos de codigo do WeNet, checklist por passo, diagrama ASCII e FAQ com 9 perguntas (#M7-09)
+- Secao 4.5.1 "Arquitetura Multi-Engine" no `docs/ARCHITECTURE.md` com tabela de implementacoes, diagrama de extensibilidade, factory pattern e comparacao por arquitetura (#M7-09)
+
+### Added
 - `SessionStateMachine` com 6 estados (INIT, ACTIVE, SILENCE, HOLD, CLOSING, CLOSED), transicoes validas, timeouts configuraveis e callbacks on_enter/on_exit (#M6-01)
 - `SessionTimeouts` dataclass com defaults do PRD (INIT: 30s, SILENCE: 30s, HOLD: 5min, CLOSING: 2s) e validacao de timeout minimo de 1s (#M6-02)
 - Funcao `timeouts_from_configure_command()` para converter campos do `SessionConfigureCommand` (ms) para `SessionTimeouts` (s) (#M6-02)

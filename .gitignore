@@ -48,3 +48,4 @@ src/theo/proto/*_pb2.pyi
 
 # Models (downloaded via theo pull)
 models/
+!src/theo/server/models/

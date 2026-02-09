@@ -48,6 +48,9 @@ grpc = [
 faster-whisper = [
     "faster-whisper>=1.1,<2.0",
 ]
+wenet = [
+    "wenet>=2.0,<3.0",
+]
 itn = [
     "nemo_text_processing>=1.1,<2.0",
 ]
@@ -64,7 +67,7 @@ dev = [
     "openai>=1.0",
 ]
 all = [
-    "theo-openvoice[server,grpc,faster-whisper,itn,dev]",
+    "theo-openvoice[server,grpc,faster-whisper,wenet,itn,dev]",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -129,6 +132,10 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = "scipy.signal"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "wenet.*"
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

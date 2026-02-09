@@ -326,6 +326,119 @@ class STTBackend(ABC):
 3. Registrar no Model Registry
 4. **Zero mudanças no runtime core**
 
+### 4.5.1 Arquitetura Multi-Engine
+
+O Theo e model-agnostic: o runtime adapta seu pipeline automaticamente com base na arquitetura declarada no manifesto do modelo. Dois backends STT estao implementados, validando que a interface `STTBackend` suporta arquiteturas fundamentalmente diferentes.
+
+**Implementacoes:**
+
+| Backend | Arquivo | Arquitetura | Partials | Hot Words | Initial Prompt |
+|---------|---------|-------------|----------|-----------|----------------|
+| `FasterWhisperBackend` | `src/theo/workers/stt/faster_whisper.py` | `encoder-decoder` | Via LocalAgreement (runtime) | Via `initial_prompt` (workaround) | Sim (conditioning) |
+| `WeNetBackend` | `src/theo/workers/stt/wenet.py` | `ctc` | Nativos (frame-by-frame) | Nativos (keyword boosting) | Nao suporta |
+
+**Diagrama de extensibilidade:**
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│                        WORKER SUBPROCESS                              │
+│                                                                       │
+│  ┌──────────────────────────────────────────────────────────────┐     │
+│  │                    STTBackend (ABC)                           │     │
+│  │                                                              │     │
+│  │  architecture    -> STTArchitecture enum                     │     │
+│  │  load()          -> carrega modelo em memoria                │     │
+│  │  capabilities()  -> EngineCapabilities                       │     │
+│  │  transcribe_file()   -> BatchResult                          │     │
+│  │  transcribe_stream() -> AsyncIterator[TranscriptSegment]     │     │
+│  │  unload()        -> libera recursos                          │     │
+│  │  health()        -> status                                   │     │
+│  └──────────┬────────────────────────┬──────────────────────────┘     │
+│             │                        │                                │
+│             ▼                        ▼                                │
+│  ┌──────────────────┐     ┌──────────────────┐     ┌──────────────┐  │
+│  │ FasterWhisper    │     │ WeNet            │     │ [Paraformer] │  │
+│  │ Backend          │     │ Backend          │     │ (futuro)     │  │
+│  │                  │     │                  │     │              │  │
+│  │ encoder-decoder  │     │ ctc              │     │ streaming-   │  │
+│  │ CTranslate2     │     │ LibTorch         │     │ native       │  │
+│  │ Whisper models   │     │ WeNet CTC models │     │              │  │
+│  └──────────────────┘     └──────────────────┘     └──────────────┘  │
+│                                                                       │
+│  _create_backend(engine) -> instancia correta                         │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+**Factory Pattern — `_create_backend()`:**
+
+No entry point do worker (`src/theo/workers/stt/main.py`), a funcao `_create_backend(engine)` resolve o nome da engine para a implementacao correta:
+
+```python
+def _create_backend(engine: str) -> STTBackend:
+    if engine == "faster-whisper":
+        from theo.workers.stt.faster_whisper import FasterWhisperBackend
+        return FasterWhisperBackend()
+    if engine == "wenet":
+        from theo.workers.stt.wenet import WeNetBackend
+        return WeNetBackend()
+    raise ValueError(f"Engine STT nao suportada: {engine}")
+```
+
+O import lazy garante que dependencias pesadas (CTranslate2, LibTorch) so sao carregadas quando a engine e realmente utilizada. Cada engine e uma dependencia opcional (`pip install theo-openvoice[faster-whisper]` ou `pip install theo-openvoice[wenet]`).
+
+**Como o manifesto direciona o pipeline:**
+
+O campo `capabilities.architecture` no manifesto `theo.yaml` e lido pelo runtime (WebSocket endpoint, Session Manager) para adaptar o comportamento de streaming:
+
+```
+                      ┌──────────────┐
+                      │ theo.yaml    │
+                      │ architecture │
+                      └──────┬───────┘
+                             │
+              ┌──────────────┼──────────────┐
+              │              │              │
+              ▼              ▼              ▼
+     encoder-decoder       ctc       streaming-native
+              │              │              │
+              ▼              ▼              ▼
+     LocalAgreement    Partials        Engine gerencia
+     para partials     nativos         estado interno
+              │              │              │
+              ▼              ▼              ▼
+     Cross-segment     Sem cross-      Depende da
+     context ativo     segment ctx     engine
+              │              │              │
+              ▼              ▼              ▼
+     Hot words via     Hot words       Engine-specific
+     initial_prompt    nativos
+```
+
+No endpoint WebSocket (`src/theo/server/routes/realtime.py`), a arquitetura e extraida do manifesto e passada ao `StreamingSession`:
+
+```python
+model_architecture = manifest.capabilities.architecture or STTArchitecture.ENCODER_DECODER
+```
+
+O `StreamingSession` usa esse campo para:
+
+1. **Cross-segment context**: apenas para `encoder-decoder` (Whisper suporta conditioning via `initial_prompt`). CTC nao suporta — o contexto e ignorado.
+2. **Hot words no prompt**: para engines sem keyword boosting nativo (Whisper), hot words sao injetados via `initial_prompt`. Para engines com suporte nativo (WeNet), hot words sao enviados via campo dedicado no `AudioFrame` gRPC.
+3. **LocalAgreement**: aplicado apenas para `encoder-decoder`. CTC e `streaming-native` produzem partials nativos — o runtime os repassa diretamente.
+
+**Comparativo de comportamento por arquitetura:**
+
+| Caracteristica | Encoder-Decoder (Whisper) | CTC (WeNet) | Streaming-Native (Futuro) |
+|----------------|--------------------------|-------------|---------------------------|
+| Partials | Via LocalAgreement (runtime) | Nativos frame-by-frame | Nativos |
+| Cross-segment context | Sim (`initial_prompt`) | Nao (ignorado) | Depende da engine |
+| Hot words | Via `initial_prompt` | Keyword boosting nativo | Depende da engine |
+| TTFB tipico | ~300ms (acumula window 3-5s) | <100ms (per-frame) | <100ms |
+| Streaming gRPC | Acumula threshold (5s) | Processa cada chunk | Engine gerencia estado |
+| Melhor para | Qualidade maxima, batch | Baixa latencia, streaming | Streaming verdadeiro |
+
+**Principio de validacao (M7):** Se a interface `STTBackend` funciona para Faster-Whisper (encoder-decoder) E WeNet (CTC) sem condicional `if architecture == "ctc"` espalhado pelo runtime core, a abstracao esta correta. Os unicos pontos onde a arquitetura e consultada sao: (1) `StreamingSession._build_initial_prompt()` para decidir se inclui cross-segment context, e (2) `StreamingSession._receive_worker_events()` para decidir se atualiza cross-segment context apos `transcript.final`. Esses sao pontos de variacao legitimos, nao leaky abstractions.
+
 ### 4.6 Session Manager (apenas STT)
 
 Gerencia o **estado de cada sessão de streaming**. Componente que **não existe em nenhum projeto open-source de STT**.

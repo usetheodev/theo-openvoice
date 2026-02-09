@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from theo._types import STTArchitecture
 from theo.exceptions import ModelNotFoundError
 from theo.logging import get_logger
 from theo.server.models.events import (
@@ -169,6 +170,8 @@ def _create_streaming_session(
     session_id: str,
     on_event: Callable[[ServerEvent], Awaitable[None]],
     language: str | None = None,
+    architecture: STTArchitecture = STTArchitecture.ENCODER_DECODER,
+    engine_supports_hot_words: bool = False,
 ) -> StreamingSession | None:
     """Cria StreamingSession se streaming_grpc_client esta disponivel.
 
@@ -217,6 +220,8 @@ def _create_streaming_session(
         grpc_client=grpc_client,
         postprocessor=postprocessor,
         on_event=on_event,
+        architecture=architecture,
+        engine_supports_hot_words=engine_supports_hot_words,
     )
 
 
@@ -268,7 +273,7 @@ async def realtime_endpoint(
         return
 
     try:
-        registry.get_manifest(model)
+        manifest = registry.get_manifest(model)
     except ModelNotFoundError:
         await websocket.accept()
         error_event = StreamingErrorEvent(
@@ -279,6 +284,10 @@ async def realtime_endpoint(
         await _send_event(websocket, error_event)
         await websocket.close(code=1008, reason=f"Model not found: {model}")
         return
+
+    # Extrair architecture e hot_words capability do manifesto
+    model_architecture = manifest.capabilities.architecture or STTArchitecture.ENCODER_DECODER
+    model_supports_hot_words = manifest.capabilities.hot_words or False
 
     # --- Accept conexao ---
     await websocket.accept()
@@ -314,6 +323,8 @@ async def realtime_endpoint(
         session_id=session_id,
         on_event=_on_session_event,
         language=language,
+        architecture=model_architecture,
+        engine_supports_hot_words=model_supports_hot_words,
     )
 
     # Referencia mutavel para a session (usada pelo monitor de inatividade)

@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from theo._types import SessionState
+from theo._types import SessionState, STTArchitecture
 from theo.exceptions import InvalidTransitionError, WorkerCrashError
 from theo.logging import get_logger
 from theo.server.models.events import (
@@ -110,6 +110,9 @@ class StreamingSession:
         cross_segment_context: CrossSegmentContext para conditioning do
             proximo segmento com texto do transcript.final anterior
             (opcional, para backward compat).
+        architecture: Arquitetura STT do backend (CTC, ENCODER_DECODER).
+            CTC produz partials nativos (sem LocalAgreement) e nao suporta
+            initial_prompt. Default: ENCODER_DECODER (backward compat).
     """
 
     def __init__(
@@ -127,6 +130,8 @@ class StreamingSession:
         wal: SessionWAL | None = None,
         recovery_timeout_s: float = 10.0,
         cross_segment_context: CrossSegmentContext | None = None,
+        engine_supports_hot_words: bool = False,
+        architecture: STTArchitecture = STTArchitecture.ENCODER_DECODER,
     ) -> None:
         self._session_id = session_id
         self._preprocessor = preprocessor
@@ -136,6 +141,8 @@ class StreamingSession:
         self._on_event = on_event
         self._hot_words = hot_words
         self._enable_itn = enable_itn
+        self._engine_supports_hot_words = engine_supports_hot_words
+        self._architecture = architecture
 
         # State machine (M6)
         self._state_machine = state_machine or SessionStateMachine()
@@ -688,21 +695,32 @@ class StreamingSession:
     def _build_initial_prompt(self) -> str | None:
         """Constroi initial_prompt combinando hot words e cross-segment context.
 
-        Formato:
+        Quando a engine suporta hot words nativamente
+        (``_engine_supports_hot_words=True``), hot words NAO sao injetadas no
+        initial_prompt — sao enviadas via campo ``hot_words`` do AudioFrame
+        para que a engine use keyword boosting nativo. Apenas cross-segment
+        context e incluido no prompt.
+
+        Quando a engine NAO suporta hot words nativamente (Whisper), hot words
+        sao injetadas via initial_prompt como workaround semantico.
+
+        Formato (sem suporte nativo):
             - Hot words + contexto: "Termos: PIX, TED, Selic. {context}"
             - Apenas hot words: "Termos: PIX, TED, Selic."
             - Apenas contexto: "{context}"
             - Nenhum: None
 
         Returns:
-            String de prompt ou None se nao ha hot words nem contexto.
+            String de prompt ou None se nao ha conteudo.
         """
         hot_words_prompt: str | None = None
-        if self._hot_words:
+        if self._hot_words and not self._engine_supports_hot_words:
             hot_words_prompt = f"Termos: {', '.join(self._hot_words)}."
 
+        # Cross-segment context: apenas para engines que suportam initial_prompt
+        # (encoder-decoder como Whisper). CTC nao suporta conditioning via prompt.
         context_prompt: str | None = None
-        if self._cross_segment_context is not None:
+        if self._cross_segment_context is not None and self._architecture != STTArchitecture.CTC:
             context_prompt = self._cross_segment_context.get_prompt()
 
         if hot_words_prompt and context_prompt:
@@ -793,7 +811,12 @@ class StreamingSession:
                     # Cross-segment context (M6-09): armazenar texto do
                     # transcript.final para usar como initial_prompt no
                     # proximo segmento. Usa texto pos-processado (ITN).
-                    if self._cross_segment_context is not None:
+                    # Apenas para engines que suportam initial_prompt
+                    # (encoder-decoder). CTC nao suporta conditioning.
+                    if (
+                        self._cross_segment_context is not None
+                        and self._architecture != STTArchitecture.CTC
+                    ):
                         self._cross_segment_context.update(text)
                 else:
                     # Partial: emitir sem post-processing
