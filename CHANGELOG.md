@@ -8,10 +8,52 @@ e este projeto adere ao [Versionamento Semantico](https://semver.org/lang/pt-BR/
 ## [Unreleased]
 
 ### Added
+- Endpoint WebSocket `WS /v1/realtime` com handshake (model, language, session_id) e protocolo de eventos JSON (#M5-T5-02)
+- Pydantic models para 8 tipos de evento servidor e 4 tipos de comando cliente WebSocket (#M5-T5-01)
+- Protocol handler `dispatch_message()` para dispatch tipado de frames binarios e comandos JSON (#M5-T5-03)
+- Heartbeat WebSocket com ping a cada 10s e timeout de inatividade configuravel (#M5-T5-04)
+- `EnergyPreFilter` com RMS + spectral flatness para pre-filtragem de silencio antes do Silero VAD (#M5-T5-05)
+- `SileroVADClassifier` com lazy-loading do modelo Silero e sensitivity levels (high/normal/low) (#M5-T5-06)
+- `VADDetector` coordenando energy pre-filter + Silero com debounce de fala (250ms) e silencio (300ms) (#M5-T5-07)
+- `StreamingPreprocessor` adapter frame-by-frame para preprocessing de audio em streaming (#M5-T5-08)
+- `StreamingGRPCClient` e `StreamHandle` para streaming gRPC bidirecional runtime-to-worker com crash detection via stream break (#M5-T5-09)
+- `STTWorkerServicer.TranscribeStream` implementado como streaming gRPC bidirecional no worker (#M5-T5-10)
+- Conversor `transcript_segment_to_proto_event()` para conversao proto de eventos de streaming (#M5-T5-10)
+- `FasterWhisperBackend.transcribe_stream()` para transcricao streaming via acumulacao com threshold de 5s (#M5-T5-11)
+- `StreamingSession` orquestrando fluxo completo: preprocessing -> VAD -> gRPC worker -> post-processing -> callback (#M5-T5-12)
+- `BackpressureController` com sliding window para deteccao de envio mais rapido que real-time e drop de frames por backlog (#M5-T5-13)
+- `StreamingSession.commit()` para force commit manual de segmento via `input_audio_buffer.commit` (#M5-T5-14)
+- Metricas Prometheus para streaming: `theo_stt_ttfb_seconds`, `theo_stt_final_delay_seconds`, `theo_stt_active_sessions`, `theo_stt_vad_events_total` (#M5-T5-15)
+- 218 testes unitarios cobrindo todos os componentes do M5: eventos, protocolo, heartbeat, VAD, preprocessor, gRPC, session, backpressure, metricas (#M5)
+- 83 testes de edge cases para M5: frames vazios/oversized, JSON malformado, double close, use-after-close, debounce de VAD em fronteiras, backpressure com zero-byte frames, conversores proto com defaults, precedencia bytes vs text em WebSocket (#M5-T5-16)
+- Teste de estabilidade de sessao de 5 minutos (simulada) validando ausencia de memory leak (<10MB) e degradacao de TTFB (<1.2x) (#M5-T5-18)
+- Teste de estabilidade com 200 segmentos curtos validando ausencia de vazamento de recursos em ciclos rapidos de open/close de streams gRPC (#M5-T5-18)
 - Property `name` na interface `TextStage` ABC para identificacao de stages no post-processing, simetrica com `AudioStage` (#M4-CR-F03)
 - Logging por stage no `PostProcessingPipeline.process()` equivalente ao preprocessing pipeline (#M4-CR-F03)
 - Re-exports de `AudioPreprocessingPipeline` e `AudioStage` no `theo.preprocessing.__init__` via `__all__` (#M4-CR-F06)
 - Script `scripts/demo_m4.sh` para demo end-to-end da Fase 1: preprocessing + post-processing + API + CLI (#M4-DEMO)
+
+### Changed
+- Endpoint WebSocket `/v1/realtime` agora integra `StreamingSession` completo: audio frames passam por backpressure -> preprocessing -> VAD -> gRPC worker -> post-processing (#M5-CR2-01)
+- `VADDetector` agora faz debounce por total de samples acumulados em vez de contagem de frames, corrigindo calculo para frames de tamanho variavel (#M5-CR2-03)
+- `BackpressureController.clock` tipado como `Callable[[], float]` em vez de `object` para type safety (#M5-CR2-02)
+- `_create_streaming_session()` com tipo correto `Callable[[ServerEvent], Awaitable[None]]` para `on_event` (#M5-CR2-01)
+
+### Fixed
+- Endpoint WebSocket `/v1/realtime` descartava todos os audio frames recebidos sem processamento — agora integra pipeline completo via `StreamingSession` (#M5-CR2-01)
+- Race condition em `StreamingSession._handle_speech_end()` onde `vad.speech_end` podia ser emitido antes de `transcript.final` — agora aguarda receiver task completar (#M5-CR2-02)
+- Cancel RPC no servicer tinha mensagem de erro desatualizada referenciando M5 (#M5-CR2-03)
+- `SileroVADClassifier._ensure_model_loaded()` nao era thread-safe — adicionado double-check locking com `threading.Lock` (#M5-CR2-05)
+- `_handle_speech_start` agora limpa stream/receiver task anteriores antes de abrir novo stream, evitando leak de recursos em duplo SPEECH_START (#M5-CR-01)
+- `_proto_event_to_transcript_segment` preserva `start_ms=0` e `end_ms=0` como valores validos em vez de converter para `None` incorretamente (#M5-CR-05)
+- `_send_event` aceita qualquer `ServerEvent` em vez de apenas 3 tipos especificos (#M5-CR-02)
+- `SessionConfigureCommand` rejeita timeouts negativos e zero com validacao `Field(gt=0)` (#M5-CR-03)
+- `BackpressureController` usa duracao do primeiro frame (constante) em vez do frame atual para calculo de taxa efetiva (#M5-CR-08)
+- `suppress(Exception)` no fechamento de WebSocket por inatividade restringido para `suppress(WebSocketDisconnect, RuntimeError, OSError)` (#M5-CR-14)
+- Logs de `_send_event` agora incluem `session_id` para correlacao (#M5-CR-13)
+
+### Added
+- `SileroVADClassifier.preload()` metodo async que carrega o modelo em thread separada via `run_in_executor`, evitando bloqueio do event loop (#M5-CR-10)
 
 ### Fixed
 - `theo serve` agora instancia pipelines de preprocessing e postprocessing com config toggles antes de criar a app — sem esse fix os pipelines ficavam `None` em producao (#M4-CR-F01)

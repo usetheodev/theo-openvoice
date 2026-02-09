@@ -84,6 +84,7 @@ def _make_context() -> MagicMock:
     """Cria mock de grpc.aio.ServicerContext."""
     ctx = MagicMock()
     ctx.abort = AsyncMock()
+    ctx.cancelled = MagicMock(return_value=False)
     return ctx
 
 
@@ -202,16 +203,22 @@ class TestTranscribeFile:
 
 
 class TestTranscribeStream:
-    async def test_returns_unimplemented(self) -> None:
+    async def test_empty_stream_produces_no_events(self) -> None:
         servicer = STTWorkerServicer(
             backend=MockBackend(),
             model_name="large-v3",
             engine="faster-whisper",
         )
         ctx = _make_context()
-        await servicer.TranscribeStream(None, ctx)
-        ctx.abort.assert_called_once()
-        assert ctx.abort.call_args[0][0] == grpc.StatusCode.UNIMPLEMENTED
+
+        async def empty_iterator() -> AsyncIterator[object]:
+            return
+            yield  # pragma: no cover — make it an async generator
+
+        events = []
+        async for event in servicer.TranscribeStream(empty_iterator(), ctx):
+            events.append(event)
+        assert len(events) == 0
 
 
 class TestCancel:

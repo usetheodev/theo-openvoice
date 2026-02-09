@@ -4,7 +4,7 @@
 **Base**: PRD v2.1, ARCHITECTURE.md v1.0
 **Status**: Em execucao
 **Data**: 2026-02-07
-**Ultima atualizacao**: 2026-02-08
+**Ultima atualizacao**: 2026-02-09
 
 **Autores**:
 - Sofia Castellani (Principal Solution Architect)
@@ -27,7 +27,7 @@ O PRD define 3 fases de produto. Este roadmap decompoe essas fases em **10 miles
 
 ```
 PRD Fase 1 (STT Batch) ✅       PRD Fase 2 (Streaming)          PRD Fase 3 (Telefonia)
-├── M1: Fundacao ✅             ├── M5: WebSocket + VAD         ├── M8: RTP Listener
+├── M1: Fundacao ✅             ├── M5: WebSocket + VAD ✅      ├── M8: RTP Listener
 ├── M2: Worker gRPC ✅          ├── M6: Session Manager         ├── M9: Scheduler Avancado
 ├── M3: API Batch ✅            ├── M7: Segundo Backend         └── M10: Full-Duplex
 └── M4: Pipelines ✅
@@ -297,10 +297,11 @@ Validacao:
 
 ---
 
-### M5 -- WebSocket + VAD
+### M5 -- WebSocket + VAD ✅
 
 **Tema**: T3 -- Streaming em Tempo Real
 **Esforco**: G (4-6 semanas)
+**Status**: **Concluido** (2026-02-09)
 **Dependencias**: M4 (preprocessing funcional em modo streaming), M2 (worker gRPC)
 
 **Descricao**: Implementar o endpoint WebSocket `/v1/realtime` com protocolo de eventos JSON, integracao com Silero VAD (energy pre-filter + classificacao), e streaming gRPC bidirecional entre runtime e worker. Este e o milestone de maior complexidade tecnica ate aqui.
@@ -350,6 +351,38 @@ wscat -c ws://localhost:8000/v1/realtime?model=faster-whisper-tiny
 **Perspectiva Viktor (Real-Time)**: O gRPC bidirecional e o ponto critico. O stream `TranscribeStream` deve suportar cancelamento (ctx.cancel()), e o runtime deve detectar stream break para crash detection. Nao implementar health check polling separado -- o stream break e a deteccao. Testar cenario: matar worker com SIGKILL durante streaming e verificar que o runtime detecta em <100ms.
 
 **Perspectiva Andre (Platform)**: WebSocket + gRPC streaming = muitas file descriptors abertas. Configurar ulimits no container desde ja. Monitorar `connections_active` como metrica.
+
+**Resultado**: Todos os criterios atingidos. 15/15 entregaveis completos. Endpoint WebSocket `WS /v1/realtime` com handshake (model, language, session_id) e protocolo de eventos JSON (8 tipos de evento servidor, 4 tipos de comando cliente). Protocol handler `dispatch_message()` para dispatch tipado de frames binarios e comandos JSON. Heartbeat WebSocket com ping a cada 10s e timeout configuravel. `EnergyPreFilter` com RMS + spectral flatness como pre-filtragem de silencio antes do Silero VAD. `SileroVADClassifier` com lazy-loading do modelo Silero e sensitivity levels (high/normal/low). `VADDetector` coordenando energy pre-filter + Silero com debounce de fala (250ms) e silencio (300ms). `StreamingPreprocessor` adapter frame-by-frame reutilizando stages do M4. `StreamingGRPCClient` e `StreamHandle` para streaming gRPC bidirecional runtime-to-worker com crash detection via stream break. `STTWorkerServicer.TranscribeStream` implementado como streaming gRPC bidirecional no worker. `FasterWhisperBackend.transcribe_stream()` para transcricao streaming via acumulacao com threshold de 5s. `StreamingSession` orquestrando fluxo completo: preprocessing -> VAD -> gRPC worker -> post-processing -> callback. `BackpressureController` com sliding window para deteccao de envio mais rapido que real-time e drop de frames por backlog. `StreamingSession.commit()` para force commit manual de segmento. Metricas Prometheus: `theo_stt_ttfb_seconds`, `theo_stt_final_delay_seconds`, `theo_stt_active_sessions`, `theo_stt_vad_events_total`. Testes de estabilidade: sessao de 5 minutos (simulada) sem degradacao de latencia nem crescimento de memoria >10MB, e teste de 200 segmentos curtos sem vazamento de recursos. 340 testes novos (total: 740 testes). mypy strict sem erros, ruff limpo, CI verde.
+
+---
+
+### CHECKPOINT: M5 Completo
+
+Apos M5, a infraestrutura de streaming em tempo real esta funcional:
+
+```
+Validacao:
+  [x] WS /v1/realtime funcional com protocolo de eventos JSON
+  [x] Protocolo de eventos: session.created, session.configure, session.close, session.cancel
+  [x] Recebimento de audio binario via WebSocket (frames PCM)
+  [x] Preprocessing em modo streaming (frame-by-frame)
+  [x] Energy pre-filter (RMS + spectral flatness) antes do Silero VAD
+  [x] Silero VAD integrado com sensitivity levels (high/normal/low)
+  [x] Eventos VAD: vad.speech_start, vad.speech_end
+  [x] gRPC streaming bidirecional: TranscribeStream (AudioFrame -> TranscriptEvent)
+  [x] Eventos de transcript: transcript.partial, transcript.final
+  [x] Post-processing aplicado apenas em transcript.final
+  [x] Backpressure: rate_limit e frames_dropped
+  [x] Heartbeat WebSocket com ping/pong
+  [x] input_audio_buffer.commit: force commit manual de segmento
+  [x] Metricas Prometheus para streaming
+  [x] Testes de estabilidade (5 min simulado, 200 segmentos curtos)
+  [x] 740 testes, mypy strict, ruff limpo
+```
+
+**O que um usuario pode fazer**: Transcrever audio em tempo real via WebSocket com partial e final transcripts, deteccao de atividade vocal (VAD), backpressure automatico, heartbeat, e force commit manual. Audio de qualquer sample rate e preprocessado frame-by-frame. Texto final formatado via ITN.
+
+**O que falta para Fase 2 Core completa (M6)**: Session Manager com maquina de estados (6 estados), Ring Buffer com read fence e force commit, WAL in-memory para recovery, LocalAgreement para partial transcripts, cross-segment context.
 
 ---
 
@@ -616,7 +649,7 @@ M1 (Fundacao) ✅
 ├──► M2 (Worker gRPC) ✅
 │    ├──► M3 (API Batch + CLI) ✅
 │    │    ├──► M4 (Pipelines) ✅
-│    │    │    ├──► M5 (WebSocket + VAD)
+│    │    │    ├──► M5 (WebSocket + VAD) ✅
 │    │    │    │    ├──► M6 (Session Manager)
 │    │    │    │    │    ├──► M7 (Segundo Backend)
 │    │    │    │    │    └──► M8 (RTP Listener)
@@ -660,7 +693,7 @@ O caminho critico principal vai de M1 a M7 (entrega completa de STT model-agnost
 | M2 -- Worker gRPC ✅ | M (2-4 sem) | 3-6 sem |
 | M3 -- API Batch ✅ | M (2-4 sem) | 5-10 sem |
 | M4 -- Pipelines ✅ | M (2-4 sem) | 7-14 sem |
-| M5 -- WebSocket + VAD | G (4-6 sem) | 11-20 sem |
+| M5 -- WebSocket + VAD ✅ | G (4-6 sem) | 11-20 sem |
 | M6 -- Session Manager | G (4-6 sem) | 15-26 sem |
 | M7 -- Segundo Backend | M (2-4 sem) | 17-30 sem |
 | M8 -- RTP Listener | M (2-4 sem) | 19-34 sem |

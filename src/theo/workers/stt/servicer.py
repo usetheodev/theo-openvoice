@@ -13,20 +13,24 @@ import grpc
 from theo.logging import get_logger
 from theo.proto.stt_worker_pb2 import (
     TranscribeFileResponse,
+    TranscriptEvent,
 )
 from theo.workers.stt.converters import (
     batch_result_to_proto_response,
     health_dict_to_proto_response,
     proto_request_to_transcribe_params,
+    transcript_segment_to_proto_event,
 )
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
     from theo.proto.stt_worker_pb2 import (
+        AudioFrame,
         CancelRequest,
         CancelResponse,
         HealthRequest,
         TranscribeFileRequest,
-        TranscriptEvent,
     )
     from theo.workers.stt.interface import STTBackend
 
@@ -83,24 +87,102 @@ class STTWorkerServicer(_BaseServicer):
 
     async def TranscribeStream(  # noqa: N802  # type: ignore[override]
         self,
-        request_iterator: object,
-        context: grpc.aio.ServicerContext[object, TranscriptEvent],
-    ) -> None:
-        """Streaming STT — nao implementado nesta milestone."""
-        await context.abort(
-            grpc.StatusCode.UNIMPLEMENTED,
-            "TranscribeStream sera implementado no M5 (Streaming)",
+        request_iterator: AsyncIterator[AudioFrame],
+        context: grpc.aio.ServicerContext[AudioFrame, TranscriptEvent],
+    ) -> AsyncIterator[TranscriptEvent]:
+        """Transcricao STT em streaming bidirecional.
+
+        Recebe stream de AudioFrames, delega ao backend via transcribe_stream,
+        e retorna stream de TranscriptEvents.
+
+        Metadados (session_id, initial_prompt, hot_words) sao extraidos do
+        primeiro AudioFrame antes de iniciar o backend.
+        """
+        # Ler primeiro frame para extrair metadados da sessao
+        first_frame: AudioFrame | None = None
+        async for frame in request_iterator:
+            first_frame = frame
+            break
+
+        if first_frame is None:
+            # Stream vazio — nenhum frame recebido
+            return
+
+        session_id = first_frame.session_id
+        initial_prompt: str | None = (
+            first_frame.initial_prompt if first_frame.initial_prompt else None
         )
+        hot_words: list[str] | None = (
+            list(first_frame.hot_words) if first_frame.hot_words else None
+        )
+
+        # Se o primeiro frame ja sinaliza fim, nao ha audio para processar
+        if first_frame.is_last:
+            logger.info("transcribe_stream_empty", session_id=session_id)
+            return
+
+        async def audio_chunk_generator() -> AsyncIterator[bytes]:
+            """Extrai PCM bytes do stream de AudioFrames.
+
+            Emite os dados do primeiro frame (ja lido) e depois consome
+            o restante do request_iterator.
+            """
+            # Emitir dados do primeiro frame
+            yield bytes(first_frame.data)
+
+            # Consumir frames restantes
+            async for frame in request_iterator:
+                if context.cancelled():
+                    return
+                if frame.is_last:
+                    return
+                yield bytes(frame.data)
+
+        logger.info("transcribe_stream_start", session_id=session_id)
+
+        try:
+            # transcribe_stream e implementado como async generator em todos
+            # os backends (usa yield), entao retorna AsyncGenerator diretamente.
+            # mypy interpreta a assinatura ABC como Coroutine -> AsyncIterator,
+            # mas na pratica o resultado e iteravel sem await.
+            stream = self._backend.transcribe_stream(
+                audio_chunks=audio_chunk_generator(),
+                language=None,
+                initial_prompt=initial_prompt,
+                hot_words=hot_words,
+            )
+            async for segment in stream:  # type: ignore[attr-defined]
+                if context.cancelled():
+                    logger.info("transcribe_stream_cancelled", session_id=session_id)
+                    return
+                event = transcript_segment_to_proto_event(segment, session_id)
+                yield event
+        except Exception as exc:
+            logger.error(
+                "transcribe_stream_error",
+                session_id=session_id,
+                error=str(exc),
+            )
+            await context.abort(grpc.StatusCode.INTERNAL, str(exc))
+            return  # pragma: no cover — unreachable em gRPC real
+
+        logger.info("transcribe_stream_done", session_id=session_id)
 
     async def Cancel(  # noqa: N802  # type: ignore[override]
         self,
         request: CancelRequest,
         context: grpc.aio.ServicerContext[CancelRequest, CancelResponse],
     ) -> None:
-        """Cancelamento — nao implementado nesta milestone."""
+        """Cancelamento unario — nao implementado.
+
+        Cancelamento de streaming usa stream break via gRPC call.cancel()
+        no StreamHandle (runtime-side). Este RPC unario e mantido para
+        potencial uso futuro em cancelamento de requests batch.
+        """
         await context.abort(
             grpc.StatusCode.UNIMPLEMENTED,
-            "Cancel sera implementado no M5 (Streaming)",
+            "Cancel unario nao implementado. "
+            "Cancelamento de streaming usa stream break via gRPC call.cancel().",
         )
 
     async def Health(  # noqa: N802  # type: ignore[override]

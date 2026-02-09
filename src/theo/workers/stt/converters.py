@@ -11,11 +11,12 @@ from theo.proto import (
     HealthResponse,
     Segment,
     TranscribeFileResponse,
+    TranscriptEvent,
     Word,
 )
 
 if TYPE_CHECKING:
-    from theo._types import BatchResult, SegmentDetail, WordTimestamp
+    from theo._types import BatchResult, SegmentDetail, TranscriptSegment, WordTimestamp
     from theo.proto.stt_worker_pb2 import TranscribeFileRequest
 
 
@@ -88,4 +89,30 @@ def health_dict_to_proto_response(
         status=health.get("status", "unknown"),
         model_name=model_name,
         engine=engine,
+    )
+
+
+def transcript_segment_to_proto_event(
+    segment: TranscriptSegment,
+    session_id: str,
+) -> TranscriptEvent:
+    """Converte TranscriptSegment Theo em TranscriptEvent protobuf.
+
+    Usado pelo TranscribeStream para converter segmentos do backend
+    em mensagens gRPC de streaming.
+    """
+    words = []
+    if segment.words:
+        words = [word_timestamp_to_proto(w) for w in segment.words]
+
+    return TranscriptEvent(
+        session_id=session_id,
+        event_type="final" if segment.is_final else "partial",
+        text=segment.text,
+        segment_id=segment.segment_id,
+        start_ms=segment.start_ms or 0,
+        end_ms=segment.end_ms or 0,
+        language=segment.language or "",
+        confidence=segment.confidence or 0.0,
+        words=words,
     )

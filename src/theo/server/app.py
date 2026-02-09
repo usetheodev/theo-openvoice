@@ -8,7 +8,7 @@ from fastapi import FastAPI
 
 import theo
 from theo.server.error_handlers import register_error_handlers
-from theo.server.routes import health, transcriptions, translations
+from theo.server.routes import health, realtime, transcriptions, translations
 
 if TYPE_CHECKING:
     from theo.postprocessing.pipeline import PostProcessingPipeline
@@ -50,5 +50,6 @@ def create_app(
     app.include_router(health.router)
     app.include_router(transcriptions.router)
     app.include_router(translations.router)
+    app.include_router(realtime.router)
 
     return app

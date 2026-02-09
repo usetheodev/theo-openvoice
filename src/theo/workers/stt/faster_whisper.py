@@ -16,6 +16,7 @@ from theo._types import (
     EngineCapabilities,
     SegmentDetail,
     STTArchitecture,
+    TranscriptSegment,
     WordTimestamp,
 )
 from theo.exceptions import AudioFormatError, ModelLoadError
@@ -24,8 +25,6 @@ from theo.workers.stt.interface import STTBackend
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
-
-    from theo._types import TranscriptSegment
 
 try:
     from faster_whisper import WhisperModel
@@ -157,8 +156,121 @@ class FasterWhisperBackend(STTBackend):
         initial_prompt: str | None = None,
         hot_words: list[str] | None = None,
     ) -> AsyncIterator[TranscriptSegment]:
-        raise NotImplementedError("Streaming sera implementado no M5 (LocalAgreement)")
-        yield  # pragma: no cover - unreachable, makes it an async generator
+        """Transcreve audio em streaming via acumulacao com threshold.
+
+        Acumula chunks de audio PCM 16-bit 16kHz mono em buffer interno.
+        Quando o buffer atinge o threshold (5s), faz inference no buffer
+        acumulado e yield TranscriptSegment(is_final=True).
+
+        Chunk vazio (b"") sinaliza fim do stream -- o buffer restante e
+        transcrito e emitido como segmento final.
+
+        Sem LocalAgreement nesta implementacao -- cada segmento acumulado
+        ate o threshold e emitido como final. LocalAgreement sera adicionado
+        em milestone futuro.
+
+        Args:
+            audio_chunks: Iterator assincrono de chunks PCM 16-bit 16kHz mono.
+            language: Codigo ISO 639-1, "auto", ou "mixed".
+            initial_prompt: Contexto para guiar transcricao.
+            hot_words: Palavras para keyword boosting via initial_prompt.
+
+        Yields:
+            TranscriptSegment com is_final=True para cada buffer transcrito.
+        """
+        if self._model is None:
+            msg = "Modelo nao carregado. Chame load() primeiro."
+            raise ModelLoadError("unknown", msg)
+
+        accumulation_threshold_seconds = 5.0
+        sample_rate = 16000
+        threshold_samples = int(accumulation_threshold_seconds * sample_rate)
+
+        buffer_chunks: list[np.ndarray] = []
+        buffer_samples = 0
+        segment_id = 0
+
+        effective_prompt = initial_prompt
+        if hot_words:
+            hot_words_text = f"Termos: {', '.join(hot_words)}."
+            effective_prompt = (
+                f"{effective_prompt} {hot_words_text}" if effective_prompt else hot_words_text
+            )
+
+        fw_language: str | None = language
+        if fw_language in ("auto", "mixed"):
+            fw_language = None
+
+        async for chunk in audio_chunks:
+            if not chunk:
+                break
+
+            audio_array = _audio_bytes_to_numpy(chunk)
+            buffer_chunks.append(audio_array)
+            buffer_samples += len(audio_array)
+
+            if buffer_samples >= threshold_samples:
+                accumulated = np.concatenate(buffer_chunks)
+                segment = await self._transcribe_accumulated(
+                    accumulated, fw_language, effective_prompt, segment_id
+                )
+                yield segment
+                segment_id += 1
+                buffer_chunks = []
+                buffer_samples = 0
+
+        if buffer_chunks:
+            accumulated = np.concatenate(buffer_chunks)
+            if len(accumulated) > 0:
+                segment = await self._transcribe_accumulated(
+                    accumulated, fw_language, effective_prompt, segment_id
+                )
+                yield segment
+
+    async def _transcribe_accumulated(
+        self,
+        audio: np.ndarray,
+        language: str | None,
+        initial_prompt: str | None,
+        segment_id: int,
+    ) -> TranscriptSegment:
+        """Transcreve audio acumulado e retorna TranscriptSegment."""
+        loop = asyncio.get_running_loop()
+        segments_iter, info = await loop.run_in_executor(
+            None,
+            lambda: self._model.transcribe(  # type: ignore[union-attr]
+                audio,
+                language=language,
+                initial_prompt=initial_prompt,
+                temperature=0.0,
+                beam_size=5,
+                vad_filter=False,
+            ),
+        )
+
+        fw_segments = await loop.run_in_executor(None, list, segments_iter)
+
+        full_text = " ".join(seg.text.strip() for seg in fw_segments).strip()
+
+        start_ms: int | None = None
+        end_ms: int | None = None
+        avg_confidence: float | None = None
+
+        if fw_segments:
+            start_ms = int(fw_segments[0].start * 1000)
+            end_ms = int(fw_segments[-1].end * 1000)
+            logprobs = [seg.avg_logprob for seg in fw_segments]
+            avg_confidence = sum(logprobs) / len(logprobs)
+
+        return TranscriptSegment(
+            text=full_text,
+            is_final=True,
+            segment_id=segment_id,
+            start_ms=start_ms,
+            end_ms=end_ms,
+            language=info.language,
+            confidence=avg_confidence,
+        )
 
     async def unload(self) -> None:
         self._model = None

@@ -186,9 +186,9 @@ class TestTranscribeFile:
 
 
 class TestTranscribeStream:
-    async def test_raises_not_implemented(self) -> None:
+    async def test_model_not_loaded_raises_error(self) -> None:
         backend = FasterWhisperBackend()
-        with pytest.raises(NotImplementedError):
+        with pytest.raises(ModelLoadError, match="nao carregado"):
 
             async def _empty_gen() -> None:
                 return
