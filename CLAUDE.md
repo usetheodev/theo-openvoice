@@ -2,44 +2,43 @@
 
 Runtime unificado de voz (STT + TTS) construido do zero em Python. Orquestra engines de inferencia (Faster-Whisper, Silero VAD, Kokoro, Piper) com API OpenAI-compatible.
 
-**Status: Pre-implementacao.** PRD completo, zero codigo Python ainda.
+**Status: Fase 1 do PRD 100% entregue.** M1 (Foundation), M2 (Worker gRPC), M3 (API Batch), M4 (Pipelines) completos. 400 testes passando. Proximo: M5 (WebSocket + VAD).
 
 ## Commands
 
 ```bash
-# Runtime (quando implementado)
-theo serve                              # Inicia API Server
-theo pull faster-whisper-large-v3       # Baixa modelo STT
-theo list                               # Lista modelos instalados
-theo transcribe <file>                  # Transcreve arquivo
-theo transcribe --stream                # Streaming do microfone
+# Development (always use make targets — they use .venv/bin/ automatically)
+make check              # format + lint + typecheck
+make test               # all tests
+make test-unit          # unit tests only (prefer during development)
+make test-integration   # integration tests only
+make test-fast          # all tests except @pytest.mark.slow
+make ci                 # full pipeline: format + lint + typecheck + test
+make proto              # generate protobuf stubs
 
-# Desenvolvimento
-python -m pytest tests/                 # Roda todos os testes
-python -m pytest tests/unit/            # Apenas testes unitarios
-python -m pytest tests/unit/test_foo.py::test_bar  # Teste individual
-python -m mypy src/                # Typecheck
-python -m ruff check src/               # Lint
-python -m ruff format src/              # Format
+# Individual test
+.venv/bin/python -m pytest tests/unit/test_foo.py::test_bar -q
 ```
 
 ## Architecture
 
 ```
-src/
+src/theo/
 ├── server/           # FastAPI — endpoints REST + WebSocket
-├── scheduler/        # Roteamento e priorizacao de requests
+│   └── routes/       # transcriptions, translations, health
+├── scheduler/        # Request routing and prioritization
 ├── registry/         # Model Registry (theo.yaml, lifecycle)
 ├── workers/          # Subprocess gRPC management
-│   └── stt/          # STTBackend interface + implementations
-├── preprocessing/    # Audio pipeline (resample, normalize, denoise)
-├── postprocessing/   # Text pipeline (ITN, entity formatting, hot words)
-├── session/          # Session Manager (estados, ring buffer, VAD, recovery)
-├── cli/              # CLI commands (typer/click)
+│   └── stt/          # STTBackend interface + FasterWhisperBackend
+├── preprocessing/    # Audio pipeline (resample, DC remove, gain normalize)
+├── postprocessing/   # Text pipeline (ITN via NeMo, fail-open)
+├── cli/              # CLI commands (click)
 └── proto/            # gRPC protobuf definitions
 ```
 
-Detalhes completos: @docs/ARCHITECTURE.md
+Full details: @docs/ARCHITECTURE.md
+Roadmap: @docs/ROADMAP.md
+PRD: @docs/PRD.md
 
 ## Key Design Decisions
 
@@ -53,7 +52,7 @@ ADRs completos: @docs/PRD.md (secao "Architecture Decision Records")
 
 ## Code Style
 
-- Python 3.11+, tipagem estrita com mypy
+- Python 3.12 (via `uv`), tipagem estrita com mypy
 - Async-first: todas as interfaces publicas sao `async`
 - Formatacao: ruff (format + lint)
 - Imports: absolutos a partir de `theo.` (ex: `from theo.registry import Registry`)
@@ -61,14 +60,17 @@ ADRs completos: @docs/PRD.md (secao "Architecture Decision Records")
 - Docstrings: apenas em interfaces publicas (ABC) e funcoes nao-obvias
 - Sem comentarios obvios — o codigo deve ser auto-explicativo
 - Erros: exceptions tipadas por dominio, nunca `Exception` generico
+- Commits seguem conventional commits: `feat:`, `fix:`, `refactor:`, `test:`, `docs:`
 
 ## Testing
 
-- Framework: pytest + pytest-asyncio
-- Fixtures em `tests/fixtures/` (arquivos de audio de exemplo)
+- Framework: pytest + pytest-asyncio com `asyncio_mode = "auto"` (sem `@pytest.mark.asyncio`)
+- Async FastAPI tests: `httpx.AsyncClient` com `ASGITransport`
+- Para testar error handlers (500): `ASGITransport(raise_app_exceptions=False)`
+- Fixtures em `tests/conftest.py` (audio WAV sine tones 440Hz gerados automaticamente)
 - Mocks: usar `unittest.mock` para engines de inferencia nos testes unitarios
-- Testes de integracao requerem modelo instalado (`theo pull`)
-- **IMPORTANTE**: Sempre rodar teste individual durante desenvolvimento, nao a suite inteira
+- Testes de integracao marcados com `@pytest.mark.integration`
+- **IMPORTANTE**: Sempre rodar `make test-unit` durante desenvolvimento, nao a suite inteira
 
 ## Things That Will Bite You
 
@@ -79,6 +81,7 @@ ADRs completos: @docs/PRD.md (secao "Architecture Decision Records")
 - **`vad_filter: false` no manifesto.** O VAD e do runtime. Nao habilitar o VAD interno da engine (ex: Faster-Whisper) — duplicaria o trabalho.
 - **Session Manager e so STT.** TTS e stateless por request. Nao tentar reusar Session Manager para TTS.
 - **LocalAgreement e para encoder-decoder apenas.** CTC e streaming-native tem partials nativos — nao aplicar LocalAgreement neles.
+- **Manifest `type` field** e normalizado para `model_type` no `ModelManifest` (evita conflito com built-in Python).
 
 ## Workflow
 
@@ -86,11 +89,12 @@ ADRs completos: @docs/PRD.md (secao "Architecture Decision Records")
 - Consultar a arquitetura (@docs/ARCHITECTURE.md) para entender onde cada peca se encaixa
 - Ao adicionar nova engine STT: implementar `STTBackend` ABC, criar manifesto `theo.yaml`, registrar no Registry. Zero mudancas no runtime core.
 - Ao adicionar novo stage de preprocessing/postprocessing: seguir o padrao pipeline existente (cada stage e toggleavel via config)
-- Commits seguem conventional commits: `feat:`, `fix:`, `refactor:`, `test:`, `docs:`
 
 ## Environment
 
-- Python 3.11+
+- **Python 3.12** via `uv` (sistema tem 3.10, projeto requer >=3.11)
+- Venv: `.venv/` criado com `uv venv --python 3.12`
+- Todos os comandos devem usar `.venv/bin/` ou `make` targets (que ja usam `.venv/bin/`)
 - CUDA opcional (fallback para CPU transparente)
 - Dependencias pesadas (Faster-Whisper, nemo_text_processing) sao opcionais por engine
 - gRPC tools necessarios para gerar protobufs: `grpcio-tools`
@@ -98,15 +102,7 @@ ADRs completos: @docs/PRD.md (secao "Architecture Decision Records")
 ## API Contracts
 
 - REST: compativel com OpenAI Audio API (`/v1/audio/transcriptions`, `/v1/audio/translations`)
-- WebSocket: protocolo de eventos JSON original (`/v1/realtime`) — inspirado na OpenAI Realtime API mas simplificado para STT-only
+- WebSocket: protocolo de eventos JSON original (`/v1/realtime`) — inspirado na OpenAI Realtime API mas simplificado para STT-only [M5]
 - gRPC: protocolo interno runtime <-> worker (nao exposto a clientes)
 
 Contratos detalhados: @docs/PRD.md (secoes 9-13)
-
-## Available Skills
-
-- `/architecture-review` — Revisao de arquitetura (layering, interfaces, patterns)
-- `/streaming-audit` — Auditoria de latencia, backpressure, cancelamento
-- `/latency-budget` — Analise de latencia voice-to-voice por estagio
-- `/voice-test-scenarios` — Geracao de cenarios de teste realistas
-- `/dx-audit` — Auditoria de developer experience
