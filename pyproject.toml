@@ -90,6 +90,8 @@ dev = [
     "types-protobuf>=5.29",
     "types-grpcio>=1.0",
     "scipy-stubs>=1.11",
+    "fastapi>=0.115,<1.0",
+    "starlette>=0.36,<1.0",
     "openai>=1.0",
 ]
 all = [
