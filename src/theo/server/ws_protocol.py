@@ -17,6 +17,8 @@ from theo.server.models.events import (
     SessionCloseCommand,
     SessionConfigureCommand,
     StreamingErrorEvent,
+    TTSCancelCommand,
+    TTSSpeakCommand,
 )
 
 if TYPE_CHECKING:
@@ -32,6 +34,8 @@ _COMMAND_TYPES: dict[str, type[ClientCommand]] = {
     "session.cancel": SessionCancelCommand,
     "session.close": SessionCloseCommand,
     "input_audio_buffer.commit": InputAudioBufferCommitCommand,
+    "tts.speak": TTSSpeakCommand,
+    "tts.cancel": TTSCancelCommand,
 }
 
 

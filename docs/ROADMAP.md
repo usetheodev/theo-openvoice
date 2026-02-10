@@ -26,9 +26,9 @@ Este documento define a sequencia de implementacao do Theo OpenVoice, organizada
 O PRD define 3 fases de produto. Este roadmap decompoe essas fases em **9 milestones** com granularidade executavel. As fases do PRD sao mantidas como agrupamento logico, mas a unidade de planejamento e o milestone.
 
 ```
-PRD Fase 1 (STT Batch) ✅       PRD Fase 2 (Streaming) ✅       PRD Fase 3 (Escala + Full-Duplex)
-├── M1: Fundacao ✅             ├── M5: WebSocket + VAD ✅      ├── M8: Scheduler Avancado
-├── M2: Worker gRPC ✅          ├── M6: Session Manager ✅      └── M9: Full-Duplex
+PRD Fase 1 (STT Batch) ✅       PRD Fase 2 (Streaming) ✅       PRD Fase 3 (Escala + Full-Duplex) ✅
+├── M1: Fundacao ✅             ├── M5: WebSocket + VAD ✅      ├── M8: Scheduler Avancado ✅
+├── M2: Worker gRPC ✅          ├── M6: Session Manager ✅      └── M9: Full-Duplex ✅
 ├── M3: API Batch ✅            └── M7: Segundo Backend ✅
 └── M4: Pipelines ✅
 ```
@@ -592,10 +592,11 @@ Validacao:
 
 ---
 
-### M9 -- Full-Duplex (STT + TTS)
+### M9 -- Full-Duplex (STT + TTS) ✅
 
 **Tema**: T5 -- Escala e Full-Duplex
 **Esforco**: M (2-4 semanas)
+**Status**: **Concluido** (2026-02-09)
 **Dependencias**: M8 (Scheduler avancado)
 
 **Descricao**: Habilitar co-scheduling de STT + TTS para agentes de voz full-duplex. Inclui mute-on-speak como fallback para cenarios sem AEC.
@@ -624,11 +625,13 @@ Validacao:
 | Coordenacao STT/TTS adiciona latencia ao pipeline | Media | Medio | Sinais assincronos (eventos, nao polling); nao bloquear STT esperando TTS |
 | Latencia V2V de 300ms e agressiva para ponta a ponta | Alta | Alto | Medir por componente; identificar gargalos; aceitar 500ms como target inicial |
 
+**Resultado**: Todos os criterios atingidos. 10/10 tasks do STRATEGIC_M9.md completas. `TTSBackend` ABC com `synthesize()` retornando `AsyncIterator[bytes]` para streaming com baixo TTFB. `KokoroBackend` implementando TTSBackend com chunks de 4096 bytes (~85ms a 24kHz). Proto `tts_worker.proto` com `Synthesize` (server-streaming) e `Health` (unario). `TTSWorkerServicer` com streaming de chunks PCM e deteccao de cancelamento. Worker TTS como subprocess gRPC (porta 50052). `POST /v1/audio/speech` endpoint OpenAI-compatible com WAV/PCM response. WebSocket full-duplex: `tts.speak` e `tts.cancel` commands, `tts.speaking_start` e `tts.speaking_end` events, binary audio frames server->client. Mute-on-speak: `StreamingSession.mute()/unmute()` com descarte de frames durante TTS ativo, unmute garantido via try/finally. Metricas TTS: `theo_tts_ttfb_seconds`, `theo_tts_synthesis_duration_seconds`, `theo_tts_requests_total`, `theo_tts_active_sessions`, `theo_stt_muted_frames_total`. ~192 testes novos (total: 1600 testes). mypy strict sem erros, ruff limpo, CI verde.
+
 ---
 
-### CHECKPOINT: Fase 3 Completa
+### CHECKPOINT: Fase 3 Completa ✅
 
-Apos M9, a Fase 3 do PRD esta entregue:
+Apos M9, a Fase 3 do PRD esta entregue (2026-02-09):
 
 ```
 Validacao:
@@ -638,6 +641,8 @@ Validacao:
   [x] Mute-on-speak como fallback
   [x] Documentacao de integracao full-duplex
 ```
+
+**O que um usuario pode fazer**: Tudo de M8 + full-duplex STT+TTS na mesma conexao WebSocket. O runtime sintetiza voz via `tts.speak`, coordena mute-on-speak para evitar transcricao do proprio audio, e suporta `tts.cancel` para interrupcao imediata. API REST `POST /v1/audio/speech` para TTS batch. Metricas Prometheus para TTFB, duracao, requests e sessoes ativas. 4 metricas TTS + 1 metrica STT mute. Todas as 3 fases do PRD entregues.
 
 ---
 
@@ -652,7 +657,7 @@ M1 (Fundacao) ✅
 │    │    │    │    ├──► M6 (Session Manager) ✅
 │    │    │    │    │    ├──► M7 (Segundo Backend) ✅
 │    │    │    │    │    │    └──► M8 (Scheduler Avancado) ✅
-│    │    │    │    │    │         └──► M9 (Full-Duplex)
+│    │    │    │    │    │         └──► M9 (Full-Duplex) ✅
 ```
 
 ### Dependencias Detalhadas
@@ -675,7 +680,7 @@ M1 (Fundacao) ✅
 M1 -> M2 -> M3 -> M4 -> M5 -> M6 -> M7 -> M8 -> M9
 ```
 
-O caminho critico e linear de M1 a M9. Milestones M1-M8 completos. Proximo: M9 (Full-Duplex).
+Todos os milestones completos. Caminho critico finalizado.
 
 ---
 
@@ -691,7 +696,7 @@ O caminho critico e linear de M1 a M9. Milestones M1-M8 completos. Proximo: M9 (
 | M6 -- Session Manager ✅ | G (4-6 sem) | 15-26 sem |
 | M7 -- Segundo Backend ✅ | M (2-4 sem) | 17-30 sem |
 | M8 -- Scheduler Avancado ✅ | M (2-4 sem) | 19-34 sem |
-| M9 -- Full-Duplex | M (2-4 sem) | 21-38 sem |
+| M9 -- Full-Duplex ✅ | M (2-4 sem) | 21-38 sem |
 
 **Nota**: Estimativas sao para um time de 3 pessoas.
 
@@ -735,6 +740,7 @@ Nenhum milestone e considerado "completo" sem estes criterios transversais:
 | M6 | `session_duration_seconds`, `segments_force_committed_total`, `confidence_avg`, `worker_errors_total` |
 | M7 | Metricas por engine/architecture |
 | M8 | `scheduler_queue_depth` (Gauge), `scheduler_queue_wait_seconds`, `scheduler_grpc_duration_seconds`, `scheduler_cancel_latency_seconds`, `scheduler_batch_size` (Histograms), `scheduler_requests_total`, `scheduler_aging_promotions_total` (Counters) |
+| M9 | `theo_tts_ttfb_seconds`, `theo_tts_synthesis_duration_seconds`, `theo_tts_requests_total`, `theo_tts_active_sessions`, `theo_stt_muted_frames_total` |
 
 ---
 

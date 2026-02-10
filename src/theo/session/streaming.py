@@ -48,6 +48,7 @@ from theo.session.metrics import (
     stt_active_sessions,
     stt_confidence_avg,
     stt_final_delay_seconds,
+    stt_muted_frames_total,
     stt_segments_force_committed_total,
     stt_session_duration_seconds,
     stt_ttfb_seconds,
@@ -198,6 +199,10 @@ class StreamingSession:
         # Flag: TTFB ja foi registrado para este segmento?
         self._ttfb_recorded_for_segment = False
 
+        # Mute-on-speak (M9): quando True, frames sao descartados
+        # sem preprocessing, VAD nem envio ao worker.
+        self._muted = False
+
         # Timestamp de inicio da sessao para metrica de duracao
         self._session_start_monotonic = time.monotonic()
 
@@ -225,6 +230,25 @@ class StreamingSession:
         return self._state_machine.state
 
     @property
+    def is_muted(self) -> bool:
+        """True se STT esta silenciado (mute-on-speak ativo)."""
+        return self._muted
+
+    def mute(self) -> None:
+        """Silencia o STT (mute-on-speak). Idempotente."""
+        if self._muted:
+            return
+        self._muted = True
+        logger.debug("session_muted", session_id=self._session_id)
+
+    def unmute(self) -> None:
+        """Retoma o STT apos mute-on-speak. Idempotente."""
+        if not self._muted:
+            return
+        self._muted = False
+        logger.debug("session_unmuted", session_id=self._session_id)
+
+    @property
     def wal(self) -> SessionWAL:
         """WAL da sessao para consulta de checkpoints (usado em recovery)."""
         return self._wal
@@ -245,6 +269,12 @@ class StreamingSession:
         """
         state = self._state_machine.state
         if state in (SessionState.CLOSED, SessionState.CLOSING):
+            return
+
+        # Mute-on-speak: descartar frame sem processar (TTS ativo)
+        if self._muted:
+            if HAS_METRICS and stt_muted_frames_total is not None:
+                stt_muted_frames_total.inc()
             return
 
         self._last_audio_time = time.monotonic()

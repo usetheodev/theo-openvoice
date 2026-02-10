@@ -40,6 +40,7 @@ class SessionConfig(BaseModel):
     enable_itn: bool = True
     preprocessing: PreprocessingOverrides = PreprocessingOverrides()
     input_sample_rate: int | None = None
+    model_tts: str | None = None
 
 
 class WordEvent(BaseModel):
@@ -165,6 +166,28 @@ class SessionClosedEvent(BaseModel):
     segments_transcribed: int
 
 
+class TTSSpeakingStartEvent(BaseModel):
+    """Emitido quando o TTS comeca a produzir audio."""
+
+    model_config = ConfigDict(frozen=True)
+
+    type: Literal["tts.speaking_start"] = "tts.speaking_start"
+    request_id: str
+    timestamp_ms: int
+
+
+class TTSSpeakingEndEvent(BaseModel):
+    """Emitido quando o TTS termina de produzir audio."""
+
+    model_config = ConfigDict(frozen=True)
+
+    type: Literal["tts.speaking_end"] = "tts.speaking_end"
+    request_id: str
+    timestamp_ms: int
+    duration_ms: int
+    cancelled: bool = False
+
+
 # ---------------------------------------------------------------------------
 # Client -> Server commands
 # ---------------------------------------------------------------------------
@@ -187,6 +210,7 @@ class SessionConfigureCommand(BaseModel):
     enable_itn: bool | None = None
     preprocessing: PreprocessingOverrides | None = None
     input_sample_rate: int | None = Field(default=None, gt=0)
+    model_tts: str | None = None
 
 
 class SessionCancelCommand(BaseModel):
@@ -213,6 +237,33 @@ class SessionCloseCommand(BaseModel):
     type: Literal["session.close"] = "session.close"
 
 
+class TTSSpeakCommand(BaseModel):
+    """Comando para sintetizar voz via TTS no WebSocket full-duplex.
+
+    O cliente envia texto e recebe audio TTS como binary frames.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    type: Literal["tts.speak"] = "tts.speak"
+    text: str
+    voice: str = "default"
+    request_id: str | None = None
+
+
+class TTSCancelCommand(BaseModel):
+    """Cancela a sintese TTS em andamento.
+
+    Se request_id e fornecido, cancela apenas essa sintese.
+    Se omitido, cancela qualquer sintese ativa.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    type: Literal["tts.cancel"] = "tts.cancel"
+    request_id: str | None = None
+
+
 # ---------------------------------------------------------------------------
 # Union types for dispatch
 # ---------------------------------------------------------------------------
@@ -228,6 +279,8 @@ ServerEvent = (
     | SessionFramesDroppedEvent
     | StreamingErrorEvent
     | SessionClosedEvent
+    | TTSSpeakingStartEvent
+    | TTSSpeakingEndEvent
 )
 
 ClientCommand = (
@@ -235,4 +288,6 @@ ClientCommand = (
     | SessionCancelCommand
     | InputAudioBufferCommitCommand
     | SessionCloseCommand
+    | TTSSpeakCommand
+    | TTSCancelCommand
 )

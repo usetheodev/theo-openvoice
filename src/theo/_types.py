@@ -139,3 +139,30 @@ class EngineCapabilities:
     supports_batch: bool = False
     supports_word_timestamps: bool = False
     max_concurrent_sessions: int = 1
+
+
+# --- TTS ---
+
+
+@dataclass(frozen=True, slots=True)
+class VoiceInfo:
+    """Informacoes sobre uma voz disponivel no backend TTS."""
+
+    voice_id: str
+    name: str
+    language: str
+    gender: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class TTSSpeechResult:
+    """Resultado de sintese TTS (audio completo).
+
+    Usado pelo endpoint REST POST /v1/audio/speech.
+    Para streaming, o TTSBackend.synthesize() retorna AsyncIterator[bytes].
+    """
+
+    audio_data: bytes
+    sample_rate: int
+    duration: float
+    voice: str

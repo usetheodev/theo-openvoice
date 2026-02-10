@@ -1,8 +1,8 @@
 # Theo OpenVoice — Documento de Arquitetura
 
-**Versão**: 1.0 (Provisório — pré-implementação)
+**Versão**: 2.0
 **Base**: PRD v2.1
-**Status**: Em fase de design. Nenhum código implementado ainda.
+**Status**: Implementado. M1-M9 completos, todas as 3 fases do PRD entregues.
 
 ---
 
@@ -66,7 +66,7 @@ theo serve                          → serve ambos
 │  POST /v1/audio/transcriptions    (STT batch)                       │
 │  POST /v1/audio/translations      (STT tradução)                    │
 │  POST /v1/audio/speech            (TTS)                             │
-│  WS   /v1/realtime                (STT streaming)  [Fase 2]        │
+│  WS   /v1/realtime                (STT+TTS full-duplex)            │
 │  GET  /health                     (health check)                    │
 │  GET  /metrics                    (Prometheus)                      │
 │                                                                     │
@@ -169,7 +169,7 @@ Processo principal do Theo. Recebe todas as requests e delega para os subsistema
 | `/v1/audio/transcriptions`       | POST      | 1    | Transcrição de arquivo (batch)     |
 | `/v1/audio/translations`         | POST      | 1    | Tradução para inglês (batch)       |
 | `/v1/audio/speech`               | POST      | 1    | Síntese de voz (TTS)              |
-| `/v1/realtime`                   | WebSocket | 2    | Streaming STT bidirecional         |
+| `/v1/realtime`                   | WebSocket | 2+3  | STT+TTS full-duplex                |
 | `/health`                        | GET       | 1    | Health check                       |
 | `/metrics`                       | GET       | 1    | Métricas Prometheus                |
 
@@ -282,6 +282,52 @@ service STTWorker {
 ```
 
 **Detecção de crash**: O stream gRPC bidirecional (`TranscribeStream`) funciona como heartbeat implícito. Se o worker crashar, o stream termina com erro → runtime detecta imediatamente.
+
+### 4.4.1 TTS Workers
+
+TTS workers seguem o mesmo modelo de subprocess gRPC dos STT workers. A diferenca principal e que TTS usa **server-streaming** (texto entra, chunks de audio saem) em vez de bidirecional.
+
+**Protocolo gRPC TTS:**
+
+```protobuf
+service TTSWorker {
+  rpc Synthesize (SynthesizeRequest) returns (stream SynthesizeChunk);
+  rpc Health     (HealthRequest)     returns (HealthResponse);
+}
+
+message SynthesizeRequest {
+  string request_id = 1;
+  string text = 2;
+  string voice = 3;
+  int32 sample_rate = 4;
+  float speed = 5;
+}
+
+message SynthesizeChunk {
+  bytes audio_data = 1;
+  bool is_last = 2;
+  float duration_seconds = 3;
+}
+```
+
+**Interface TTSBackend:**
+
+```python
+class TTSBackend(ABC):
+    async def load(self, model_path: str, config: dict) -> None: ...
+    async def synthesize(self, text: str, voice: str = "default", *,
+                        sample_rate: int = 24000, speed: float = 1.0
+                        ) -> AsyncIterator[bytes]: ...
+    async def voices(self) -> list[VoiceInfo]: ...
+    async def unload(self) -> None: ...
+    async def health(self) -> dict[str, str]: ...
+```
+
+**Implementacao:**
+
+| Backend | Arquivo | Engine | Chunk Size | Sample Rate |
+|---------|---------|--------|------------|-------------|
+| `KokoroBackend` | `src/theo/workers/tts/kokoro.py` | Kokoro | 4096 bytes (~85ms) | 24kHz |
 
 ### 4.5 Interface STTBackend
 
@@ -597,6 +643,45 @@ Transforma o texto cru da engine em texto **usável**.
 | Entity (Banking)     | "um dois três ponto quatro..."     | "123.456.789-00"|
 | Hot Word Correction  | "pics" (hot word: PIX)             | "PIX"           |
 
+### 4.11 Full-Duplex (STT + TTS)
+
+STT e TTS operam na mesma conexao WebSocket (`/v1/realtime`), coordenados por mute-on-speak.
+
+**Fluxo:**
+
+```
+Cliente                     API Server               STT Worker    TTS Worker
+  |                              |                        |              |
+  | Audio frames (binary) -----> |                        |              |
+  |                              | Preprocessing + VAD    |              |
+  |                              |---> gRPC stream -----> |              |
+  | <--- transcript.partial ---  |                        |              |
+  | <--- transcript.final -----  |                        |              |
+  |                              |                        |              |
+  | {"type":"tts.speak"} ------> |                        |              |
+  |                              | session.mute()         |              |
+  |                              |----> Synthesize ------> |             |
+  | <--- tts.speaking_start ---  |                        |              |
+  | <--- binary audio chunks --- |  <--- chunks --------- |              |
+  | <--- tts.speaking_end -----  |                        |              |
+  |                              | session.unmute()       |              |
+  |                              |                        |              |
+  | Audio frames (binary) -----> | (STT resumes)         |              |
+```
+
+**Mute-on-Speak:**
+
+Enquanto o TTS esta ativo, o STT descarta frames de audio do cliente:
+
+1. `tts.speak` recebido -> `session.mute()`
+2. Audio frames do cliente -> descartados (sem preprocessing, sem VAD)
+3. TTS completa ou erro -> `session.unmute()` (via `finally`)
+4. Audio frames do cliente -> processados normalmente
+
+Metrica `theo_stt_muted_frames_total` conta frames descartados.
+
+**Limitacao**: Mute-on-speak nao suporta barge-in (usuario interromper o bot). Para barge-in, e necessario AEC (Acoustic Echo Cancellation) externo.
+
 ---
 
 ## 5. Fluxos de Dados
@@ -752,6 +837,8 @@ Audio → Preprocessing → Engine.transcribe_stream() (engine gerencia estado i
 | `session.cancel`            | JSON   | Cancela sessão                                  |
 | `input_audio_buffer.commit` | JSON   | Força commit de segmento                        |
 | `session.close`             | JSON   | Encerra sessão gracefully                       |
+| `tts.speak`                 | JSON   | Sintetiza voz e envia audio como binary frames  |
+| `tts.cancel`                | JSON   | Cancela sintese TTS ativa                       |
 
 ### 7.2 Mensagens Servidor → Cliente
 
@@ -765,6 +852,9 @@ Audio → Preprocessing → Engine.transcribe_stream() (engine gerencia estado i
 | `session.hold`            | Sessão transitou para HOLD (silêncio prolongado)     |
 | `session.rate_limit`      | Backpressure: cliente enviando rápido demais         |
 | `session.frames_dropped`  | Frames descartados (backlog > 10s)                   |
+| `tts.speaking_start`      | TTS comecou a produzir audio                         |
+| (binary audio frames)     | Chunks de audio TTS (PCM 16-bit, server->client)     |
+| `tts.speaking_end`        | TTS terminou (com flag `cancelled`)                  |
 | `error`                   | Erro (com flag `recoverable`)                        |
 | `session.closed`          | Sessão encerrada                                     |
 
@@ -903,6 +993,7 @@ theo transcribe <file> --no-itn                        # Sem ITN
 | Energy Pre-filter             | Pre-VAD para reduzir falsos positivos                  |
 | Entity Formatting             | CPF, CNPJ, valores monetários por domínio              |
 | Hot Word Correction           | Levenshtein distance + boost                           |
+| Full-Duplex Coordinator       | Mute-on-speak, co-scheduling STT+TTS na mesma sessao  |
 
 ### Bibliotecas (dependências substituíveis)
 
@@ -963,13 +1054,13 @@ curl -F file=@audio.wav -F model=faster-whisper-large-v3 \
 
 **Critério de sucesso:** Sessão WebSocket de 30 min sem degradação, com recovery sem duplicação.
 
-### Fase 3 — Escala + Full-Duplex (4 semanas)
+### Fase 3 — Escala + Full-Duplex (4 semanas) ✅
 
 **Entregáveis:**
-- Scheduler com priorização (realtime > batch)
-- Dynamic batching no worker
-- Co-scheduling STT + TTS (agentes full-duplex)
-- Mute-on-speak fallback
+- Scheduler com priorização (realtime > batch) ✅
+- Dynamic batching no worker ✅
+- Co-scheduling STT + TTS (agentes full-duplex) ✅
+- Mute-on-speak fallback ✅
 
 ---
 
@@ -986,6 +1077,10 @@ curl -F file=@audio.wav -F model=faster-whisper-large-v3 \
 | 007   | Audio Preprocessing no Runtime                    | Aceito  |
 | 008   | LocalAgreement para Partial Transcripts           | Aceito  |
 | 009   | Post-Processing Pipeline Plugável                 | Aceito  |
+| 010   | TTS MVP com Engine Placeholder (Kokoro)           | Aceito  |
+| 011   | Mute-on-Speak como Fallback (não Barge-in)        | Aceito  |
+| 012   | TTS Streaming Unidirecional (server-streaming)    | Aceito  |
+| 013   | Protocolo WebSocket Unificado STT + TTS           | Aceito  |
 
 Detalhes completos de cada ADR no [PRD v2.1](./PRD.md#architecture-decision-records-adrs).
 
@@ -1096,7 +1191,10 @@ theo-openvoice/
 | **CTC**                | Connectionist Temporal Classification (arquitetura de STT)                 |
 | **Encoder-decoder**    | Arquitetura de STT que processa chunks (ex: Whisper)                       |
 | **Streaming-native**   | Arquitetura de STT com streaming verdadeiro (ex: Paraformer)               |
+| **Full-Duplex**        | Modo onde STT e TTS operam simultaneamente na mesma sessao WebSocket       |
+| **Mute-on-Speak**      | Pausar ingestao STT enquanto TTS esta ativo (fallback sem AEC)             |
+| **TTSBackend**         | Interface que toda engine TTS deve implementar para ser plugavel no Theo   |
 
 ---
 
-*Documento provisório baseado no PRD v2.1. Será atualizado conforme a implementação avança.*
+*Documento baseado no PRD v2.1. Todas as 3 fases (M1-M9) implementadas.*

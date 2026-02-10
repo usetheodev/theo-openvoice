@@ -20,6 +20,8 @@ Hierarquia:
     |   +-- SessionClosedError
     |   +-- InvalidTransitionError
     |   +-- BufferOverrunError
+    +-- TTSError
+    |   +-- TTSSynthesisError
     +-- InvalidRequestError
 """
 
@@ -187,3 +189,19 @@ class InvalidRequestError(TheoError):
     def __init__(self, detail: str) -> None:
         self.detail = detail
         super().__init__(detail)
+
+
+# --- TTS ---
+
+
+class TTSError(TheoError):
+    """Erro relacionado a sintese de voz (TTS)."""
+
+
+class TTSSynthesisError(TTSError):
+    """Falha durante sintese de voz."""
+
+    def __init__(self, model_name: str, reason: str) -> None:
+        self.model_name = model_name
+        self.reason = reason
+        super().__init__(f"Falha na sintese TTS com modelo '{model_name}': {reason}")

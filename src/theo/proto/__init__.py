@@ -17,6 +17,21 @@ from theo.proto.stt_worker_pb2_grpc import (
     STTWorkerStub,
     add_STTWorkerServicer_to_server,
 )
+from theo.proto.tts_worker_pb2 import (
+    HealthRequest as TTSHealthRequest,
+)
+from theo.proto.tts_worker_pb2 import (
+    HealthResponse as TTSHealthResponse,
+)
+from theo.proto.tts_worker_pb2 import (
+    SynthesizeChunk,
+    SynthesizeRequest,
+)
+from theo.proto.tts_worker_pb2_grpc import (
+    TTSWorkerServicer,
+    TTSWorkerStub,
+    add_TTSWorkerServicer_to_server,
+)
 
 __all__ = [
     "AudioFrame",
@@ -27,9 +42,16 @@ __all__ = [
     "STTWorkerServicer",
     "STTWorkerStub",
     "Segment",
+    "SynthesizeChunk",
+    "SynthesizeRequest",
+    "TTSHealthRequest",
+    "TTSHealthResponse",
+    "TTSWorkerServicer",
+    "TTSWorkerStub",
     "TranscribeFileRequest",
     "TranscribeFileResponse",
     "TranscriptEvent",
     "Word",
     "add_STTWorkerServicer_to_server",
+    "add_TTSWorkerServicer_to_server",
 ]

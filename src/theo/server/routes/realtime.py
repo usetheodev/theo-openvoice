@@ -1,4 +1,4 @@
-"""WS /v1/realtime -- endpoint WebSocket para streaming STT."""
+"""WS /v1/realtime -- endpoint WebSocket para streaming STT + TTS full-duplex."""
 
 from __future__ import annotations
 
@@ -8,11 +8,21 @@ import time
 import uuid
 from typing import TYPE_CHECKING
 
+import grpc.aio
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from theo._types import STTArchitecture
+from theo._types import ModelType, STTArchitecture
 from theo.exceptions import ModelNotFoundError
 from theo.logging import get_logger
+from theo.proto.tts_worker_pb2_grpc import TTSWorkerStub
+from theo.scheduler.tts_converters import build_tts_proto_request
+from theo.scheduler.tts_metrics import (
+    HAS_TTS_METRICS,
+    tts_active_sessions,
+    tts_requests_total,
+    tts_synthesis_duration_seconds,
+    tts_ttfb_seconds,
+)
 from theo.server.models.events import (
     InputAudioBufferCommitCommand,
     SessionCancelCommand,
@@ -24,6 +34,10 @@ from theo.server.models.events import (
     SessionFramesDroppedEvent,
     SessionRateLimitEvent,
     StreamingErrorEvent,
+    TTSCancelCommand,
+    TTSSpeakCommand,
+    TTSSpeakingEndEvent,
+    TTSSpeakingStartEvent,
 )
 from theo.server.ws_protocol import (
     AudioFrameResult,
@@ -225,26 +239,288 @@ def _create_streaming_session(
     )
 
 
+# ---------------------------------------------------------------------------
+# TTS Full-Duplex Support
+# ---------------------------------------------------------------------------
+
+_TTS_SAMPLE_RATE = 24000
+_TTS_GRPC_TIMEOUT = 60.0
+_TTS_GRPC_CHANNEL_OPTIONS = [
+    ("grpc.max_send_message_length", 30 * 1024 * 1024),
+    ("grpc.max_receive_message_length", 30 * 1024 * 1024),
+]
+
+
+async def _tts_speak_task(
+    *,
+    websocket: WebSocket,
+    session_id: str,
+    session: StreamingSession | None,
+    request_id: str,
+    text: str,
+    voice: str,
+    model_tts: str | None,
+    send_event: Callable[[ServerEvent], Awaitable[None]],
+    cancel_event: asyncio.Event,
+) -> None:
+    """Background task que executa sintese TTS e envia chunks ao cliente.
+
+    Fluxo:
+        1. Resolve modelo TTS via registry
+        2. Resolve worker TTS via WorkerManager
+        3. Mute STT (antes de enviar primeiro byte)
+        4. Abre gRPC Synthesize stream
+        5. Envia chunks como binary frames ao WebSocket
+        6. Emite tts.speaking_start / tts.speaking_end
+        7. Unmute STT em finally (garante unmute mesmo em erro/cancel)
+
+    Args:
+        websocket: Conexao WebSocket ativa.
+        session_id: ID da sessao para logging.
+        session: StreamingSession (pode ser None se worker STT indisponivel).
+        request_id: ID unico do request TTS.
+        text: Texto para sintetizar.
+        voice: Voz a usar.
+        model_tts: Nome do modelo TTS (None usa default do registry).
+        send_event: Callback para enviar eventos ao cliente.
+        cancel_event: Event para sinalizar cancelamento externo.
+    """
+    from starlette.websockets import WebSocketState as _WSState
+
+    tts_start = time.monotonic()
+    cancelled = False
+    first_chunk_sent = False
+    channel = None
+
+    try:
+        # 1. Resolve modelo TTS
+        state = websocket.app.state
+        registry = getattr(state, "registry", None)
+        worker_manager = getattr(state, "worker_manager", None)
+
+        if registry is None or worker_manager is None:
+            await send_event(
+                StreamingErrorEvent(
+                    code="service_unavailable",
+                    message="TTS service not available",
+                    recoverable=True,
+                )
+            )
+            return
+
+        if model_tts is None:
+            # Procurar qualquer modelo TTS registrado
+            for m in registry.list_models():
+                try:
+                    manifest = registry.get_manifest(m)
+                    if manifest.model_type == ModelType.TTS:
+                        model_tts = m
+                        break
+                except ModelNotFoundError:
+                    continue
+            if model_tts is None:
+                await send_event(
+                    StreamingErrorEvent(
+                        code="model_not_found",
+                        message="No TTS model available",
+                        recoverable=True,
+                    )
+                )
+                return
+
+        try:
+            manifest = registry.get_manifest(model_tts)
+            if manifest.model_type != ModelType.TTS:
+                raise ModelNotFoundError(model_tts)
+        except ModelNotFoundError:
+            await send_event(
+                StreamingErrorEvent(
+                    code="model_not_found",
+                    message=f"TTS model '{model_tts}' not found",
+                    recoverable=True,
+                )
+            )
+            return
+
+        # 2. Resolve worker TTS
+        worker = worker_manager.get_ready_worker(model_tts)
+        if worker is None:
+            await send_event(
+                StreamingErrorEvent(
+                    code="worker_unavailable",
+                    message=f"No ready TTS worker for model '{model_tts}'",
+                    recoverable=True,
+                )
+            )
+            return
+
+        # 3. Build proto request
+        proto_request = build_tts_proto_request(
+            request_id=request_id,
+            text=text,
+            voice=voice,
+            sample_rate=_TTS_SAMPLE_RATE,
+            speed=1.0,
+        )
+
+        # 4. Open gRPC stream
+        worker_address = f"localhost:{worker.port}"
+        channel = grpc.aio.insecure_channel(
+            worker_address,
+            options=_TTS_GRPC_CHANNEL_OPTIONS,
+        )
+        stub = TTSWorkerStub(channel)  # type: ignore[no-untyped-call]
+        response_stream = stub.Synthesize(proto_request, timeout=_TTS_GRPC_TIMEOUT)
+
+        # 5. Stream chunks to client
+        async for chunk in response_stream:
+            # Check cancel
+            if cancel_event.is_set():
+                cancelled = True
+                break
+
+            if not chunk.audio_data:
+                if chunk.is_last:
+                    break
+                continue
+
+            # On first chunk: mute STT, emit speaking_start, record TTFB
+            if not first_chunk_sent:
+                if session is not None:
+                    session.mute()
+
+                ttfb = time.monotonic() - tts_start
+                if HAS_TTS_METRICS and tts_ttfb_seconds is not None:
+                    tts_ttfb_seconds.observe(ttfb)
+                if HAS_TTS_METRICS and tts_active_sessions is not None:
+                    tts_active_sessions.inc()
+
+                await send_event(
+                    TTSSpeakingStartEvent(
+                        request_id=request_id,
+                        timestamp_ms=int(ttfb * 1000),
+                    )
+                )
+                first_chunk_sent = True
+
+            # Send audio as binary frame
+            if websocket.client_state == _WSState.CONNECTED:
+                await websocket.send_bytes(chunk.audio_data)
+
+            if chunk.is_last:
+                break
+
+    except asyncio.CancelledError:
+        cancelled = True
+    except grpc.aio.AioRpcError as exc:
+        logger.error(
+            "tts_grpc_error",
+            session_id=session_id,
+            request_id=request_id,
+            code=str(exc.code()),
+            details=exc.details(),
+        )
+        await send_event(
+            StreamingErrorEvent(
+                code="tts_worker_error",
+                message=f"TTS worker error: {exc.details()}",
+                recoverable=True,
+            )
+        )
+    except Exception:
+        logger.exception(
+            "tts_speak_error",
+            session_id=session_id,
+            request_id=request_id,
+        )
+        await send_event(
+            StreamingErrorEvent(
+                code="tts_error",
+                message="TTS synthesis failed",
+                recoverable=True,
+            )
+        )
+    finally:
+        # Always unmute STT and emit speaking_end
+        if session is not None:
+            session.unmute()
+
+        if first_chunk_sent:
+            duration_s = time.monotonic() - tts_start
+            duration_ms = int(duration_s * 1000)
+            await send_event(
+                TTSSpeakingEndEvent(
+                    request_id=request_id,
+                    timestamp_ms=duration_ms,
+                    duration_ms=duration_ms,
+                    cancelled=cancelled,
+                )
+            )
+
+            # TTS metrics: synthesis duration and active gauge
+            if HAS_TTS_METRICS and tts_synthesis_duration_seconds is not None:
+                tts_synthesis_duration_seconds.observe(duration_s)
+            if HAS_TTS_METRICS and tts_active_sessions is not None:
+                tts_active_sessions.dec()
+
+        # TTS metrics: requests counter
+        if HAS_TTS_METRICS and tts_requests_total is not None:
+            if cancelled:
+                tts_requests_total.labels(status="cancelled").inc()
+            elif first_chunk_sent:
+                tts_requests_total.labels(status="ok").inc()
+            else:
+                tts_requests_total.labels(status="error").inc()
+
+        if channel is not None:
+            with contextlib.suppress(Exception):
+                await channel.close()
+
+        logger.debug(
+            "tts_task_done",
+            session_id=session_id,
+            request_id=request_id,
+            cancelled=cancelled,
+        )
+
+
+async def _cancel_active_tts(
+    tts_task_ref: list[asyncio.Task[None] | None],
+    tts_cancel_ref: list[asyncio.Event | None],
+) -> None:
+    """Cancela TTS ativa se existir. Aguarda finalizacao da task."""
+    cancel_event = tts_cancel_ref[0]
+    task = tts_task_ref[0]
+    if cancel_event is not None and task is not None and not task.done():
+        cancel_event.set()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await task
+    tts_task_ref[0] = None
+    tts_cancel_ref[0] = None
+
+
 @router.websocket("/v1/realtime")
 async def realtime_endpoint(
     websocket: WebSocket,
     model: str | None = None,
     language: str | None = None,
 ) -> None:
-    """Endpoint WebSocket para streaming STT bidirecional.
+    """Endpoint WebSocket para streaming STT + TTS full-duplex.
 
     Query params:
         model: Nome do modelo STT (obrigatorio).
         language: Codigo ISO 639-1 do idioma (opcional, default: auto-detect).
 
     Protocolo:
-        1. Handshake: valida modelo via registry.
+        1. Handshake: valida modelo STT via registry.
         2. Emite session.created com session_id unico.
         3. Cria StreamingSession (se worker disponivel).
         4. Main loop: recebe binary (audio frames) e text (JSON commands).
         5. Audio frames -> backpressure check -> session.process_frame().
-        6. Background task monitora inatividade e envia heartbeat pings.
-        7. On disconnect: fecha session e emite session.closed.
+        6. TTS: tts.speak cria background task, mute STT, stream audio ao cliente.
+        7. TTS: tts.cancel interrompe sintese ativa, unmute STT.
+        8. Background task monitora inatividade e envia heartbeat pings.
+        9. On disconnect: fecha session e emite session.closed.
     """
     session_id = f"sess_{uuid.uuid4().hex[:12]}"
 
@@ -335,6 +611,11 @@ async def realtime_endpoint(
 
     backpressure = BackpressureController()
 
+    # TTS full-duplex: referencia mutavel para task e cancel event
+    model_tts: str | None = None
+    tts_task_ref: list[asyncio.Task[None] | None] = [None]
+    tts_cancel_ref: list[asyncio.Event | None] = [None]
+
     monitor_task = asyncio.create_task(
         _inactivity_monitor(
             websocket=websocket,
@@ -416,6 +697,46 @@ async def realtime_endpoint(
                             session._hot_words = cmd.hot_words
                         if cmd.enable_itn is not None:
                             session._enable_itn = cmd.enable_itn
+                    # Track modelo TTS para full-duplex
+                    if cmd.model_tts is not None:
+                        model_tts = cmd.model_tts
+
+                elif isinstance(cmd, TTSSpeakCommand):
+                    tts_req_id = cmd.request_id or f"tts_{uuid.uuid4().hex[:8]}"
+                    logger.info(
+                        "tts_speak",
+                        session_id=session_id,
+                        request_id=tts_req_id,
+                        voice=cmd.voice,
+                        text_len=len(cmd.text),
+                    )
+                    # Cancelar TTS anterior se existir (sequential speaks)
+                    await _cancel_active_tts(tts_task_ref, tts_cancel_ref)
+
+                    # Criar nova TTS task
+                    cancel_ev = asyncio.Event()
+                    tts_cancel_ref[0] = cancel_ev
+                    tts_task_ref[0] = asyncio.create_task(
+                        _tts_speak_task(
+                            websocket=websocket,
+                            session_id=session_id,
+                            session=session,
+                            request_id=tts_req_id,
+                            text=cmd.text,
+                            voice=cmd.voice,
+                            model_tts=model_tts,
+                            send_event=_on_session_event,
+                            cancel_event=cancel_ev,
+                        ),
+                    )
+
+                elif isinstance(cmd, TTSCancelCommand):
+                    logger.info(
+                        "tts_cancel",
+                        session_id=session_id,
+                        request_id=cmd.request_id,
+                    )
+                    await _cancel_active_tts(tts_task_ref, tts_cancel_ref)
 
                 elif isinstance(cmd, SessionCancelCommand):
                     logger.info("session_cancel", session_id=session_id)
@@ -474,6 +795,9 @@ async def realtime_endpoint(
         )
         await _send_event(websocket, error_event, session_id=session_id)
     finally:
+        # Cancelar TTS ativa antes de fechar session
+        await _cancel_active_tts(tts_task_ref, tts_cancel_ref)
+
         # Fechar StreamingSession se ativa
         if session is not None and not session.is_closed:
             await session.close()

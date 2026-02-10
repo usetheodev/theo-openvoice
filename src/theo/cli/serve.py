@@ -30,6 +30,11 @@ DEFAULT_WORKER_BASE_PORT = 50051
     help="Diretorio com modelos instalados.",
 )
 @click.option(
+    "--cors-origins",
+    default="",
+    help="CORS origins (comma-separated). Ex: http://localhost:3000",
+)
+@click.option(
     "--log-format",
     type=click.Choice(["console", "json"]),
     default="console",
@@ -47,15 +52,23 @@ def serve(
     host: str,
     port: int,
     models_dir: str,
+    cors_origins: str,
     log_format: str,
     log_level: str,
 ) -> None:
     """Inicia o Theo API Server com workers para modelos instalados."""
     configure_logging(log_format=log_format, level=log_level)
-    asyncio.run(_serve(host, port, models_dir))
+    origins = [o.strip() for o in cors_origins.split(",") if o.strip()] if cors_origins else []
+    asyncio.run(_serve(host, port, models_dir, cors_origins=origins))
 
 
-async def _serve(host: str, port: int, models_dir: str) -> None:
+async def _serve(
+    host: str,
+    port: int,
+    models_dir: str,
+    *,
+    cors_origins: list[str] | None = None,
+) -> None:
     """Fluxo async principal do serve."""
     import uvicorn
 
@@ -91,12 +104,36 @@ async def _serve(host: str, port: int, models_dir: str) -> None:
             engine=manifest.engine,
             model_path=model_path,
             engine_config=manifest.engine_config.model_dump(),
+            worker_type="stt",
         )
         logger.info(
             "worker_spawned",
             model=manifest.name,
             engine=manifest.engine,
             port=port_counter,
+            worker_type="stt",
+        )
+        port_counter += 1
+
+    tts_models = [m for m in models if m.model_type == ModelType.TTS]
+    for manifest in tts_models:
+        model_path = str(registry.get_model_path(manifest.name))
+        tts_engine_config = manifest.engine_config.model_dump()
+        tts_engine_config["model_name"] = manifest.name
+        await worker_manager.spawn_worker(
+            model_name=manifest.name,
+            port=port_counter,
+            engine=manifest.engine,
+            model_path=model_path,
+            engine_config=tts_engine_config,
+            worker_type="tts",
+        )
+        logger.info(
+            "worker_spawned",
+            model=manifest.name,
+            engine=manifest.engine,
+            port=port_counter,
+            worker_type="tts",
         )
         port_counter += 1
 
@@ -106,6 +143,7 @@ async def _serve(host: str, port: int, models_dir: str) -> None:
         port=port,
         models_count=len(models),
         stt_workers=len(stt_models),
+        tts_workers=len(tts_models),
     )
 
     # 2.5 Build pipelines
@@ -149,6 +187,8 @@ async def _serve(host: str, port: int, models_dir: str) -> None:
         scheduler=scheduler,
         preprocessing_pipeline=preprocessing_pipeline,
         postprocessing_pipeline=postprocessing_pipeline,
+        worker_manager=worker_manager,
+        cors_origins=cors_origins,
     )
 
     # 4. Setup shutdown

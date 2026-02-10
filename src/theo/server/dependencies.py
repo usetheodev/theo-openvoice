@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from theo.preprocessing.pipeline import AudioPreprocessingPipeline
     from theo.registry.registry import ModelRegistry
     from theo.scheduler.scheduler import Scheduler
+    from theo.workers.manager import WorkerManager
 
 
 def get_preprocessing_pipeline(request: Request) -> AudioPreprocessingPipeline | None:
@@ -45,3 +46,15 @@ def get_scheduler(request: Request) -> Scheduler:
     if scheduler is None:
         raise RuntimeError("Scheduler nao configurado. Passe scheduler= em create_app().")
     return scheduler  # type: ignore[no-any-return]
+
+
+def get_worker_manager(request: Request) -> WorkerManager:
+    """Retorna o WorkerManager do app state.
+
+    Raises:
+        RuntimeError: Se worker_manager nao foi configurado em create_app().
+    """
+    worker_manager = request.app.state.worker_manager
+    if worker_manager is None:
+        raise RuntimeError("WorkerManager nao configurado. Passe worker_manager= em create_app().")
+    return worker_manager  # type: ignore[no-any-return]

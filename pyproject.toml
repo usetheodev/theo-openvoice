@@ -51,6 +51,9 @@ faster-whisper = [
 wenet = [
     "wenet>=2.0,<3.0",
 ]
+kokoro = [
+    "kokoro>=0.1,<1.0",
+]
 itn = [
     "nemo_text_processing>=1.1,<2.0",
 ]
@@ -77,7 +80,7 @@ packages = ["src/theo"]
 target-version = "py311"
 line-length = 99
 src = ["src"]
-extend-exclude = ["src/theo/proto/stt_worker_pb2*"]
+extend-exclude = ["src/theo/proto/stt_worker_pb2*", "src/theo/proto/tts_worker_pb2*"]
 
 [tool.ruff.lint]
 select = [
@@ -136,6 +139,10 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = "wenet.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "kokoro.*"
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

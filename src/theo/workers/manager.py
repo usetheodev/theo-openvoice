@@ -58,6 +58,7 @@ class WorkerHandle:
     last_started_at: float = field(default_factory=time.monotonic)
     model_path: str = ""
     engine_config: dict[str, object] = field(default_factory=dict)
+    worker_type: str = "stt"
 
 
 class WorkerManager:
@@ -78,24 +79,26 @@ class WorkerManager:
         engine: str,
         model_path: str,
         engine_config: dict[str, object],
+        worker_type: str = "stt",
     ) -> WorkerHandle:
         """Inicia um novo worker como subprocess.
 
         Args:
             model_name: Nome do modelo (para identificacao).
             port: Porta gRPC para o worker escutar.
-            engine: Nome da engine (ex: "faster-whisper").
+            engine: Nome da engine (ex: "faster-whisper", "kokoro").
             model_path: Caminho para os arquivos do modelo.
             engine_config: Configuracoes da engine.
+            worker_type: Tipo do worker ("stt" ou "tts").
 
         Returns:
             WorkerHandle com informacoes do worker.
         """
         worker_id = f"{engine}-{port}"
 
-        logger.info("spawning_worker", worker_id=worker_id, port=port, engine=engine)
+        logger.info("spawning_worker", worker_id=worker_id, port=port, engine=engine, worker_type=worker_type)
 
-        process = _spawn_worker_process(port, engine, model_path, engine_config)
+        process = _spawn_worker_process(port, engine, model_path, engine_config, worker_type=worker_type)
 
         handle = WorkerHandle(
             worker_id=worker_id,
@@ -106,6 +109,7 @@ class WorkerManager:
             state=WorkerState.STARTING,
             model_path=model_path,
             engine_config=engine_config,
+            worker_type=worker_type,
         )
 
         self._workers[worker_id] = handle
@@ -196,7 +200,7 @@ class WorkerManager:
 
             try:
                 await asyncio.sleep(delay)
-                result = await _check_worker_health(handle.port, timeout=2.0)
+                result = await _check_worker_health(handle.port, timeout=2.0, worker_type=handle.worker_type)
                 if result.get("status") == "ok":
                     handle.state = WorkerState.READY
                     logger.info("worker_ready", worker_id=worker_id, elapsed_s=round(elapsed, 2))
@@ -283,7 +287,8 @@ class WorkerManager:
         await asyncio.sleep(backoff)
 
         process = _spawn_worker_process(
-            handle.port, handle.engine, handle.model_path, handle.engine_config
+            handle.port, handle.engine, handle.model_path, handle.engine_config,
+            worker_type=handle.worker_type,
         )
 
         handle.process = process
@@ -304,22 +309,25 @@ def _build_worker_cmd(
     engine: str,
     model_path: str,
     engine_config: dict[str, object],
+    worker_type: str = "stt",
 ) -> list[str]:
-    """Constroi comando CLI para iniciar worker STT como subprocess.
+    """Constroi comando CLI para iniciar worker como subprocess.
 
     Args:
         port: Porta gRPC para o worker escutar.
-        engine: Nome da engine (ex: "faster-whisper").
+        engine: Nome da engine (ex: "faster-whisper", "kokoro").
         model_path: Caminho para os arquivos do modelo.
         engine_config: Configuracoes da engine.
+        worker_type: Tipo do worker ("stt" ou "tts").
 
     Returns:
         Lista de argumentos para subprocess.Popen.
     """
+    module = "theo.workers.tts" if worker_type == "tts" else "theo.workers.stt"
     cmd = [
         sys.executable,
         "-m",
-        "theo.workers.stt",
+        module,
         "--port",
         str(port),
         "--engine",
@@ -328,12 +336,18 @@ def _build_worker_cmd(
         model_path,
     ]
 
-    config_to_flag = {
-        "compute_type": "--compute-type",
-        "device": "--device",
-        "model_size": "--model-size",
-        "beam_size": "--beam-size",
-    }
+    if worker_type == "tts":
+        config_to_flag: dict[str, str] = {
+            "device": "--device",
+            "model_name": "--model-name",
+        }
+    else:
+        config_to_flag = {
+            "compute_type": "--compute-type",
+            "device": "--device",
+            "model_size": "--model-size",
+            "beam_size": "--beam-size",
+        }
 
     for config_key, cli_flag in config_to_flag.items():
         if config_key in engine_config:
@@ -347,19 +361,21 @@ def _spawn_worker_process(
     engine: str,
     model_path: str,
     engine_config: dict[str, object],
+    worker_type: str = "stt",
 ) -> subprocess.Popen[bytes]:
-    """Cria subprocess do worker STT.
+    """Cria subprocess do worker.
 
     Args:
         port: Porta gRPC para o worker escutar.
         engine: Nome da engine.
         model_path: Caminho para os arquivos do modelo.
         engine_config: Configuracoes da engine.
+        worker_type: Tipo do worker ("stt" ou "tts").
 
     Returns:
         Popen handle do processo criado.
     """
-    cmd = _build_worker_cmd(port, engine, model_path, engine_config)
+    cmd = _build_worker_cmd(port, engine, model_path, engine_config, worker_type=worker_type)
     return subprocess.Popen(
         cmd,
         stdout=subprocess.DEVNULL,
@@ -367,28 +383,38 @@ def _spawn_worker_process(
     )
 
 
-async def _check_worker_health(port: int, timeout: float = 2.0) -> dict[str, str]:
+async def _check_worker_health(port: int, timeout: float = 2.0, worker_type: str = "stt") -> dict[str, str]:
     """Verifica health de um worker via gRPC Health RPC.
 
     Args:
         port: Porta gRPC do worker.
         timeout: Timeout em segundos.
+        worker_type: Tipo do worker ("stt" ou "tts").
 
     Returns:
         Dict com status do worker.
     """
     import grpc.aio
 
-    from theo.proto import HealthRequest
-    from theo.proto.stt_worker_pb2_grpc import STTWorkerStub
-
     channel = grpc.aio.insecure_channel(f"localhost:{port}")
     try:
-        stub = STTWorkerStub(channel)  # type: ignore[no-untyped-call]
-        response = await asyncio.wait_for(
-            stub.Health(HealthRequest()),
-            timeout=timeout,
-        )
+        if worker_type == "tts":
+            from theo.proto import TTSHealthRequest, TTSWorkerStub
+
+            tts_stub = TTSWorkerStub(channel)  # type: ignore[no-untyped-call]
+            response = await asyncio.wait_for(
+                tts_stub.Health(TTSHealthRequest()),
+                timeout=timeout,
+            )
+        else:
+            from theo.proto import HealthRequest
+            from theo.proto.stt_worker_pb2_grpc import STTWorkerStub
+
+            stt_stub = STTWorkerStub(channel)  # type: ignore[no-untyped-call]
+            response = await asyncio.wait_for(
+                stt_stub.Health(HealthRequest()),
+                timeout=timeout,
+            )
         return {
             "status": response.status,
             "model_name": response.model_name,

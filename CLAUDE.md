@@ -2,7 +2,7 @@
 
 Runtime unificado de voz (STT + TTS) construido do zero em Python. Orquestra engines de inferencia (Faster-Whisper, Silero VAD, Kokoro, Piper) com API OpenAI-compatible.
 
-**Status: M8 (Scheduler Avancado) completo.** M1 (Foundation), M2 (Worker gRPC), M3 (API Batch), M4 (Pipelines), M5 (WebSocket + VAD), M6 (Session Manager), M7 (Segundo Backend - WeNet), M8 (Scheduler Avancado) completos. 1408 testes passando. Proximo: M9 (Full-Duplex).
+**Status: M9 (Full-Duplex) completo. Todas as fases do PRD entregues.** M1-M9 completos. 1600 testes passando. Runtime unificado STT+TTS funcional.
 
 ## Commands
 
@@ -25,17 +25,18 @@ make proto              # generate protobuf stubs
 ```
 src/theo/
 ├── server/           # FastAPI — endpoints REST + WebSocket
-│   └── routes/       # transcriptions, translations, health, realtime
-├── scheduler/        # Async priority queue, cancellation, batching, latency tracking, metrics
+│   └── routes/       # transcriptions, translations, speech, health, realtime
+├── scheduler/        # Async priority queue, cancellation, batching, latency tracking, TTS converters, metrics
 ├── registry/         # Model Registry (theo.yaml, lifecycle)
 ├── workers/          # Subprocess gRPC management
-│   └── stt/          # STTBackend interface + FasterWhisperBackend + WeNetBackend
+│   ├── stt/          # STTBackend interface + FasterWhisperBackend + WeNetBackend
+│   └── tts/          # TTSBackend interface + KokoroBackend
 ├── preprocessing/    # Audio pipeline (resample, DC remove, gain normalize)
 ├── postprocessing/   # Text pipeline (ITN via NeMo, fail-open)
 ├── vad/              # Voice Activity Detection (energy pre-filter + Silero)
-├── session/          # Session Manager (state machine, ring buffer, WAL, recovery, backpressure, metrics)
+├── session/          # Session Manager (state machine, ring buffer, WAL, recovery, backpressure, mute, metrics)
 ├── cli/              # CLI commands (click)
-└── proto/            # gRPC protobuf definitions
+└── proto/            # gRPC protobuf definitions (STT + TTS)
 ```
 
 Full details: @docs/ARCHITECTURE.md
@@ -51,6 +52,9 @@ PRD: @docs/PRD.md
 - **Workers sao subprocessos gRPC** — crash do worker nao derruba o runtime. Recovery via WAL in-memory.
 
 - **Pipeline adaptativo por `architecture`**: `StreamingSession` adapta comportamento automaticamente — encoder-decoder usa LocalAgreement + cross-segment context; CTC usa partials nativos, sem LocalAgreement, sem cross-segment context.
+- **Full-duplex via mute-on-speak.** STT e TTS na mesma conexao WebSocket. Quando TTS esta ativo, STT descarta frames (mute). Unmute garantido via try/finally.
+- **TTS e stateless por request.** Nao reusar Session Manager para TTS. Cada `tts.speak` e independente.
+- **TTSBackend espelha STTBackend.** `synthesize()` retorna `AsyncIterator[bytes]` para streaming com baixo TTFB.
 
 ADRs completos: @docs/PRD.md (secao "Architecture Decision Records")
 Como adicionar nova engine: @docs/ADDING_ENGINE.md
@@ -98,6 +102,12 @@ Como adicionar nova engine: @docs/ADDING_ENGINE.md
 - **BatchAccumulator flush e fire-and-forget.** O flush callback (`_dispatch_batch`) e chamado pelo timer asyncio. Se o scheduler para antes do flush, `stop()` faz flush manual.
 - **LatencyTracker usa TTL.** Entries expiram apos 300s. `cleanup()` deve ser chamado periodicamente para evitar memory leak em requests que nunca completam.
 - **Metricas do Scheduler sao opcionais.** Usam `try/except ImportError` identico a `theo.session.metrics`. Sempre verificar `if metric is not None` antes de observar.
+- **Mute-on-speak e try/finally.** `_tts_speak_task()` chama `session.mute()` antes do TTS e `session.unmute()` em `finally`. Se o TTS crashar, o unmute AINDA acontece. Nunca mutar sem garantir unmute.
+- **TTS binary frames sao server->client.** No WebSocket, binary frames server->client sao SEMPRE audio TTS. Client->server sao SEMPRE audio STT. Sem ambiguidade de direcao.
+- **`tts.speak` cancela o anterior.** Se um `tts.speak` chegar enquanto outro esta em andamento, o anterior e cancelado automaticamente (cancel_event.set()). Nao acumula.
+- **TTS worker e subprocess separado.** O TTS worker roda em porta diferente (default 50052 vs 50051 para STT). A factory `_create_backend("kokoro")` faz lazy import da engine.
+- **Metricas TTS sao opcionais.** Usam mesmo padrao lazy import (`try/except ImportError` + `HAS_TTS_METRICS` flag) que `theo.session.metrics`. Sempre verificar antes de observar.
+- **`POST /v1/audio/speech` retorna WAV ou PCM.** Default e WAV com header. `response_format=pcm` retorna raw PCM 16-bit.
 
 ## Workflow
 
@@ -105,6 +115,7 @@ Como adicionar nova engine: @docs/ADDING_ENGINE.md
 - Consultar a arquitetura (@docs/ARCHITECTURE.md) para entender onde cada peca se encaixa
 - Ao adicionar nova engine STT: seguir guia em @docs/ADDING_ENGINE.md (5 passos: implementar `STTBackend` ABC, criar manifesto `theo.yaml`, registrar na factory, declarar dependencia, escrever testes). Zero mudancas no runtime core.
 - Ao adicionar novo stage de preprocessing/postprocessing: seguir o padrao pipeline existente (cada stage e toggleavel via config)
+- Full-duplex guide: @docs/FULL_DUPLEX.md para integracao STT+TTS no mesmo WebSocket
 
 ## Environment
 
@@ -117,8 +128,8 @@ Como adicionar nova engine: @docs/ADDING_ENGINE.md
 
 ## API Contracts
 
-- REST: compativel com OpenAI Audio API (`/v1/audio/transcriptions`, `/v1/audio/translations`)
-- WebSocket: protocolo de eventos JSON original (`/v1/realtime`) — inspirado na OpenAI Realtime API mas simplificado para STT-only [M5]
-- gRPC: protocolo interno runtime <-> worker (nao exposto a clientes)
+- REST: compativel com OpenAI Audio API (`/v1/audio/transcriptions`, `/v1/audio/translations`, `/v1/audio/speech`)
+- WebSocket: protocolo de eventos JSON original (`/v1/realtime`) — STT streaming + TTS full-duplex. Comandos: `tts.speak`, `tts.cancel`. Eventos: `tts.speaking_start`, `tts.speaking_end`.
+- gRPC: protocolo interno runtime <-> worker (nao exposto a clientes). STT: `stt_worker.proto`. TTS: `tts_worker.proto`.
 
 Contratos detalhados: @docs/PRD.md (secoes 9-13)

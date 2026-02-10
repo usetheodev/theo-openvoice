@@ -15,6 +15,9 @@ Metricas adicionadas (M6):
 - theo_stt_segments_force_committed_total: Segmentos com force commit (ring buffer >90%)
 - theo_stt_confidence_avg: Histograma de confidence dos transcript.final
 - theo_stt_worker_recoveries_total: Counter de recovery attempts por resultado
+
+Metricas adicionadas (M9):
+- theo_stt_muted_frames_total: Frames descartados por mute-on-speak (TTS ativo)
 """
 
 from __future__ import annotations
@@ -77,6 +80,13 @@ try:
         ["result"],
     )
 
+    # M9 metrics
+
+    stt_muted_frames_total: Counter | None = _Counter(
+        "theo_stt_muted_frames_total",
+        "Frames discarded by mute-on-speak (TTS active)",
+    )
+
     HAS_METRICS = True
 
 except ImportError:
@@ -88,5 +98,6 @@ except ImportError:
     stt_segments_force_committed_total = None
     stt_confidence_avg = None
     stt_worker_recoveries_total = None
+    stt_muted_frames_total = None
 
     HAS_METRICS = False
