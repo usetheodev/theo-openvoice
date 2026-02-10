@@ -5,21 +5,44 @@ build-backend = "hatchling.build"
 [project]
 name = "theo-openvoice"
 version = "0.1.0"
-description = "Runtime unificado de voz (STT + TTS) com API OpenAI-compatible"
+description = "Unified voice runtime (STT + TTS) with OpenAI-compatible API"
 readme = "README.md"
-license = "MIT"
+license = "Apache-2.0"
 requires-python = ">=3.11"
 authors = [
     { name = "Theo Team" },
 ]
+keywords = [
+    "stt",
+    "tts",
+    "speech-to-text",
+    "text-to-speech",
+    "whisper",
+    "voice",
+    "openai",
+    "realtime",
+    "streaming",
+    "vad",
+]
 classifiers = [
-    "Development Status :: 2 - Pre-Alpha",
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Framework :: FastAPI",
     "Topic :: Multimedia :: Sound/Audio :: Speech",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Typing :: Typed",
 ]
+
+[project.urls]
+Homepage = "https://github.com/usetheo/theo-openvoice"
+Documentation = "https://usetheo.github.io/theo-openvoice"
+Repository = "https://github.com/usetheo/theo-openvoice"
+"Bug Tracker" = "https://github.com/usetheo/theo-openvoice/issues"
+Changelog = "https://github.com/usetheo/theo-openvoice/blob/main/CHANGELOG.md"
 
 dependencies = [
     "pydantic>=2.6,<3.0",

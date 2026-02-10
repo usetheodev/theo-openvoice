@@ -1,179 +1,216 @@
-# Theo OpenVoice
+<p align="center">
+  <h1 align="center">Theo OpenVoice</h1>
+  <p align="center">
+    <strong>Unified voice runtime (STT + TTS) with OpenAI-compatible API</strong>
+  </p>
+  <p align="center">
+    <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License"></a>
+    <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+"></a>
+    <a href="https://github.com/usetheo/theo-openvoice/actions"><img src="https://img.shields.io/github/actions/workflow/status/usetheo/theo-openvoice/ci.yml?branch=main&label=tests" alt="Tests"></a>
+    <a href="https://pypi.org/project/theo-openvoice/"><img src="https://img.shields.io/pypi/v/theo-openvoice" alt="PyPI"></a>
+  </p>
+</p>
 
-Runtime unificado de voz (STT + TTS) com API compativel com OpenAI, construido do zero com bibliotecas maduras de inferencia como componentes substituiveis.
+---
 
-## Status
+Theo OpenVoice is a **voice runtime built from scratch** in Python. It orchestrates inference engines (Faster-Whisper, WeNet, Silero VAD, Kokoro) within a single binary that serves both STT and TTS through an OpenAI-compatible API and an Ollama-inspired CLI.
 
-**Fase 2 completa (M1-M7).** Runtime STT model-agnostic com streaming em tempo real, session management, VAD, recovery de falhas e dois backends (Faster-Whisper + WeNet). 1217 testes, mypy strict, ruff limpo.
+Theo is **not** a fork, wrapper, or extension of existing projects. It is the **runtime layer** that sits between inference engines and production: session management, preprocessing, post-processing, scheduling, observability, and a unified CLI.
 
-| Milestone | Descricao | Status |
-|---|---|---|
-| M1 | Fundacao (tipos, interfaces, CI) | Completo |
-| M2 | Worker gRPC + Faster-Whisper | Completo |
-| M3 | API Batch REST + CLI | Completo |
-| M4 | Pipelines (preprocessing + ITN) | Completo |
-| M5 | WebSocket + VAD (Silero + energy) | Completo |
-| M6 | Session Manager (6 estados, WAL, recovery) | Completo |
-| M7 | Segundo Backend (WeNet CTC) | Completo |
-| M8 | Scheduler Avancado | Proximo |
+## Features
 
-O PRD completo (v2.1) esta disponivel em [`docs/PRD.md`](docs/PRD.md).
-
-## API OpenAI-Compatible
-
-| Endpoint | Metodo | Status | Descricao |
-|---|---|---|---|
-| `/v1/audio/transcriptions` | POST | Implementado | Transcricao de arquivo (batch) |
-| `/v1/audio/translations` | POST | Implementado | Traducao para ingles (batch) |
-| `/v1/realtime` | WebSocket | Implementado | Streaming STT bidirecional |
-| `/health` | GET | Implementado | Health check |
-
-Formatos de resposta suportados: `json`, `verbose_json`, `text`, `srt`, `vtt`.
+- **OpenAI-compatible API** — `POST /v1/audio/transcriptions`, `/translations`, `/speech`, `WS /v1/realtime`
+- **Full-duplex STT + TTS** — simultaneous speech-to-text and text-to-speech on the same WebSocket
+- **Real-time streaming** — partial and final transcripts via WebSocket with <300ms TTFB
+- **Multi-engine** — Faster-Whisper (encoder-decoder), WeNet (CTC), Kokoro (TTS) with a single interface
+- **Session Manager** — 6-state machine, ring buffer, WAL, crash recovery without segment duplication
+- **Voice Activity Detection** — Silero VAD + energy pre-filter, sensitivity levels (high/normal/low)
+- **Audio preprocessing** — resample, DC remove, gain normalize (any sample rate to 16kHz)
+- **Post-processing** — Inverse Text Normalization via NeMo ("dois mil" to "2000")
+- **Mute-on-speak** — STT pauses during TTS to prevent feedback loops
+- **Hot words** — domain-specific keyword boosting per session
+- **CLI** — `theo serve`, `theo transcribe`, `theo translate`, `theo list` (Ollama-style UX)
+- **Observability** — Prometheus metrics for TTFB, session duration, VAD events, TTS latency
 
 ## Quick Start
 
 ```bash
-# Setup (requer Python 3.11+ e uv)
-uv venv --python 3.12
-uv sync --all-extras
+# Install
+pip install theo-openvoice[server,grpc,faster-whisper]
 
-# Iniciar runtime
+# Start the runtime
 theo serve
 
-# Transcrever arquivo
+# Transcribe a file
 curl -X POST http://localhost:8000/v1/audio/transcriptions \
   -F file=@audio.wav \
   -F model=faster-whisper-large-v3
 
-# Ou via CLI
+# Or via CLI
 theo transcribe audio.wav --model faster-whisper-large-v3
-
-# Streaming via WebSocket
-wscat -c ws://localhost:8000/v1/realtime?model=faster-whisper-large-v3
 ```
 
-## Instalacao
-
-Requer Python 3.11+ e [uv](https://docs.astral.sh/uv/).
+### Streaming via WebSocket
 
 ```bash
-# Criar venv com Python 3.12
-uv venv --python 3.12
+wscat -c "ws://localhost:8000/v1/realtime?model=faster-whisper-large-v3"
+# Send binary audio frames, receive JSON transcript events
+```
 
-# Instalar com todos os extras
+### Text-to-Speech
+
+```bash
+curl -X POST http://localhost:8000/v1/audio/speech \
+  -H "Content-Type: application/json" \
+  -d '{"model": "kokoro-v1", "input": "Hello, how can I help you?", "voice": "default"}' \
+  --output speech.wav
+```
+
+## Architecture
+
+```
+                         Clients
+          CLI / REST / WebSocket (full-duplex)
+                           |
+                           v
+  +----------------------------------------------------+
+  |              API Server (FastAPI)                    |
+  |                                                    |
+  |  POST /v1/audio/transcriptions    (STT batch)      |
+  |  POST /v1/audio/translations      (STT translate)  |
+  |  POST /v1/audio/speech            (TTS)            |
+  |  WS   /v1/realtime                (STT+TTS)        |
+  +----------------------------------------------------+
+  |              Scheduler                              |
+  |  Priority queue (realtime > batch), cancellation,   |
+  |  dynamic batching, latency tracking                 |
+  +----------------------------------------------------+
+  |              Model Registry                         |
+  |  Declarative manifest (theo.yaml), lifecycle        |
+  +----------+-------------------+---------------------+
+             |                   |
+    +--------+--------+  +------+-------+
+    |  STT Workers    |  |  TTS Workers |
+    |  (subprocess    |  |  (subprocess |
+    |   gRPC)         |  |   gRPC)      |
+    |                 |  |              |
+    | Faster-Whisper  |  | Kokoro       |
+    | WeNet           |  |              |
+    +-----------------+  +--------------+
+             |
+  +----------+-------------------------------------+
+  |  Audio Preprocessing Pipeline                   |
+  |  Resample -> DC Remove -> Gain Normalize        |
+  +------------------------------------------------+
+  |  Session Manager (STT only)                     |
+  |  6 states, ring buffer, WAL, LocalAgreement,    |
+  |  cross-segment context, crash recovery          |
+  +------------------------------------------------+
+  |  VAD (Energy Pre-filter + Silero VAD)           |
+  +------------------------------------------------+
+  |  Post-Processing (ITN via NeMo)                 |
+  +------------------------------------------------+
+```
+
+## Supported Models
+
+| Engine | Type | Architecture | Partials | Hot Words | Status |
+|--------|------|-------------|----------|-----------|--------|
+| [Faster-Whisper](https://github.com/SYSTRAN/faster-whisper) | STT | encoder-decoder | LocalAgreement | via initial_prompt | Supported |
+| [WeNet](https://github.com/wenet-e2e/wenet) | STT | CTC | native | native keyword boosting | Supported |
+| [Kokoro](https://github.com/hexgrad/kokoro) | TTS | — | — | — | Supported |
+
+Adding a new engine requires ~400-700 lines of code and zero changes to the runtime core. See the [Adding an Engine](https://usetheo.github.io/theo-openvoice/docs/guides/adding-engine) guide.
+
+## API Compatibility
+
+Theo implements the [OpenAI Audio API](https://platform.openai.com/docs/api-reference/audio) contract, so existing SDKs work without modification:
+
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8000/v1", api_key="not-needed")
+
+# Transcription
+result = client.audio.transcriptions.create(
+    model="faster-whisper-large-v3",
+    file=open("audio.wav", "rb"),
+)
+print(result.text)
+
+# Text-to-Speech
+response = client.audio.speech.create(
+    model="kokoro-v1",
+    input="Hello, how can I help you?",
+    voice="default",
+)
+response.stream_to_file("output.wav")
+```
+
+## WebSocket Protocol
+
+The `/v1/realtime` endpoint supports full-duplex STT + TTS:
+
+```
+Client -> Server:
+  Binary frames     PCM 16-bit audio (any sample rate)
+  session.configure  Configure VAD, language, hot words, TTS model
+  tts.speak          Trigger text-to-speech synthesis
+  tts.cancel         Cancel active TTS
+
+Server -> Client:
+  session.created     Session established
+  vad.speech_start    Speech detected
+  transcript.partial  Intermediate hypothesis
+  transcript.final    Confirmed segment (with ITN)
+  vad.speech_end      Speech ended
+  tts.speaking_start  TTS started (STT muted)
+  Binary frames       TTS audio output
+  tts.speaking_end    TTS finished (STT unmuted)
+  error               Error with recoverable flag
+```
+
+## CLI
+
+```bash
+theo serve                                   # Start API server
+theo transcribe audio.wav                    # Transcribe file
+theo transcribe audio.wav --format srt       # Generate subtitles
+theo transcribe --stream                     # Stream from microphone
+theo translate audio.wav                     # Translate to English
+theo list                                    # List installed models
+theo inspect faster-whisper-large-v3         # Model details
+```
+
+## Development
+
+```bash
+# Setup (requires Python 3.11+ and uv)
+uv venv --python 3.12
 uv sync --all-extras
 
-# Ou extras especificos
-uv sync --extra dev --extra grpc --extra server
-```
-
-> **Importante:** O projeto usa `uv` para gerenciar o venv com Python 3.12.
-> Nao use `pip install` diretamente. Use `make` targets ou prefixe com `.venv/bin/`.
-
-## Desenvolvimento
-
-```bash
+# Development workflow
 make check       # format + lint + typecheck
-make test        # todos os testes (1217)
-make test-unit   # apenas testes unitarios (preferido durante dev)
-make test-fast   # testes exceto @pytest.mark.slow
-make ci          # pipeline completo: format + lint + typecheck + test
-make proto       # gerar stubs protobuf
+make test-unit   # unit tests (preferred during development)
+make test        # all tests (1600+)
+make ci          # full pipeline: format + lint + typecheck + test
 ```
 
-Teste individual:
+## Documentation
 
-```bash
-.venv/bin/python -m pytest tests/unit/test_foo.py::test_bar -q
-```
+Full documentation is available at **[usetheo.github.io/theo-openvoice](https://usetheo.github.io/theo-openvoice)**.
 
-Demos executaveis por milestone:
+- [Getting Started](https://usetheo.github.io/theo-openvoice/docs/getting-started/installation)
+- [Streaming Guide](https://usetheo.github.io/theo-openvoice/docs/guides/streaming-stt)
+- [Full-Duplex Guide](https://usetheo.github.io/theo-openvoice/docs/guides/full-duplex)
+- [Adding an Engine](https://usetheo.github.io/theo-openvoice/docs/guides/adding-engine)
+- [API Reference](https://usetheo.github.io/theo-openvoice/docs/api-reference/rest-api)
+- [Architecture](https://usetheo.github.io/theo-openvoice/docs/architecture/overview)
 
-```bash
-./scripts/demo_m4.sh   # Demo Fase 1: preprocessing + ITN + API
-./scripts/demo_m6.sh   # Demo M6: session manager + recovery
-./scripts/demo_m7.sh   # Demo M7: model-agnostic (WeNet + Whisper)
-```
+## Contributing
 
-## Visao
+We welcome contributions! Please read our [Contributing Guide](CONTRIBUTING.md) before submitting a pull request.
 
-Um unico binario que orquestra engines de inferencia (Faster-Whisper, WeNet, Silero VAD, Kokoro, Piper) com:
+## License
 
-- **API compativel com OpenAI** para STT batch e streaming
-- **Model-agnostic**: mesma interface para encoder-decoder (Whisper) e CTC (WeNet)
-- **Session Manager** com 6 estados, ring buffer, WAL e recovery de falhas
-- **VAD no runtime**: Silero VAD + energy pre-filter, sensitivity levels
-- **Audio Preprocessing**: resample, DC remove, gain normalize
-- **Post-Processing**: ITN via NeMo (fail-open)
-- **CLI unificado**: `theo serve`, `theo transcribe`, `theo list`
-- **Streaming real** via WebSocket com partial/final transcripts
-- **Extensivel**: consumidores podem integrar qualquer transporte (RTP, SIP) via WebSocket
-
-## Arquitetura
-
-```
-src/theo/
-├── server/           # FastAPI — endpoints REST + WebSocket
-│   └── routes/       # transcriptions, translations, health, realtime
-├── scheduler/        # Request routing e streaming gRPC
-├── registry/         # Model Registry (theo.yaml, lifecycle)
-├── workers/          # Subprocess gRPC management
-│   └── stt/          # STTBackend: FasterWhisperBackend + WeNetBackend
-├── preprocessing/    # Audio pipeline (resample, DC remove, gain normalize)
-├── postprocessing/   # Text pipeline (ITN via NeMo, fail-open)
-├── vad/              # VAD (energy pre-filter + Silero)
-├── session/          # Session Manager (state machine, ring buffer, WAL,
-│                     #   local agreement, cross-segment, recovery, metrics)
-├── cli/              # CLI commands (click)
-└── proto/            # gRPC protobuf definitions
-```
-
-```mermaid
-graph TD
-    CLI["CLI / REST / WebSocket"]
-    API["API Server (FastAPI)"]
-    SCH["Scheduler"]
-    REG["Model Registry (theo.yaml)"]
-    STT["STT Workers (gRPC)<br/>Faster-Whisper, WeNet"]
-    PRE["Preprocessing Pipeline"]
-    VAD["VAD (Energy + Silero)"]
-    SESS["Session Manager<br/>6 estados, WAL, recovery"]
-
-    CLI --> API
-    API --> SCH
-    SCH --> REG
-    SCH --> STT
-    API --> PRE
-    PRE --> VAD
-    VAD --> SESS
-    SESS --> STT
-```
-
-Detalhes completos em [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
-
-## Engines STT Suportadas
-
-| Engine | Arquitetura | Partials | Hot Words | Status |
-|---|---|---|---|---|
-| Faster-Whisper | encoder-decoder | LocalAgreement | via initial_prompt | Implementado |
-| WeNet | CTC | nativos | keyword boosting nativo | Implementado |
-
-Para adicionar uma nova engine: [`docs/ADDING_ENGINE.md`](docs/ADDING_ENGINE.md) (5 passos).
-
-## Roadmap
-
-- **Fase 1** — STT Batch + Preprocessing (M1-M4) — **Completa**
-- **Fase 2** — Streaming + Session Manager + Multi-Engine (M5-M7) — **Completa**
-- **Fase 3** — Escala + Full-Duplex (M8-M9) — Proximo
-
-Detalhes completos no [Roadmap](docs/ROADMAP.md).
-
-## Inspiracoes
-
-- **Ollama** — UX de CLI e modelo de registry local
-- **Speaches** — Validacao de API compativel com OpenAI para STT
-- **whisper-streaming** — Conceito de LocalAgreement para partial transcripts
-
-## Licenca
-
-[MIT](LICENSE)
+[Apache License 2.0](LICENSE)

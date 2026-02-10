@@ -1,11 +1,18 @@
 # Changelog
 
-Todas as mudancas relevantes deste projeto serao documentadas neste arquivo.
+All notable changes to this project will be documented in this file.
 
-O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/),
-e este projeto adere ao [Versionamento Semantico](https://semver.org/lang/pt-BR/).
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+### Added
+- Open-source community files (CODE_OF_CONDUCT.md, SECURITY.md) (#release-oss)
+- GitHub issue and pull request templates (#release-oss)
+- Docusaurus documentation site scaffold with initial content (#release-oss)
+
+## [0.1.0] - 2026-02-10
 
 ### Added
 - Proto `tts_worker.proto` definindo servico TTSWorker com `Synthesize` (server-streaming) e `Health` (unario), mensagens `SynthesizeRequest`, `SynthesizeChunk` e `HealthResponse` (#M9-02)
