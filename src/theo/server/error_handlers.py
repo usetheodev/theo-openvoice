@@ -163,12 +163,12 @@ async def _handle_unexpected_error(request: Request, exc: Exception) -> JSONResp
 
 def register_error_handlers(app: FastAPI) -> None:
     """Registra todos os exception handlers no FastAPI app."""
-    app.add_exception_handler(InvalidRequestError, _handle_invalid_request)  # type: ignore[arg-type]
-    app.add_exception_handler(ModelNotFoundError, _handle_model_not_found)  # type: ignore[arg-type]
-    app.add_exception_handler(AudioFormatError, _handle_audio_format_error)  # type: ignore[arg-type]
-    app.add_exception_handler(AudioTooLargeError, _handle_audio_too_large)  # type: ignore[arg-type]
-    app.add_exception_handler(WorkerUnavailableError, _handle_worker_unavailable)  # type: ignore[arg-type]
-    app.add_exception_handler(WorkerTimeoutError, _handle_worker_timeout)  # type: ignore[arg-type]
-    app.add_exception_handler(WorkerCrashError, _handle_worker_crash)  # type: ignore[arg-type]
-    app.add_exception_handler(TheoError, _handle_theo_error)  # type: ignore[arg-type]
+    app.add_exception_handler(InvalidRequestError, _handle_invalid_request)
+    app.add_exception_handler(ModelNotFoundError, _handle_model_not_found)
+    app.add_exception_handler(AudioFormatError, _handle_audio_format_error)
+    app.add_exception_handler(AudioTooLargeError, _handle_audio_too_large)
+    app.add_exception_handler(WorkerUnavailableError, _handle_worker_unavailable)
+    app.add_exception_handler(WorkerTimeoutError, _handle_worker_timeout)
+    app.add_exception_handler(WorkerCrashError, _handle_worker_crash)
+    app.add_exception_handler(TheoError, _handle_theo_error)
     app.add_exception_handler(Exception, _handle_unexpected_error)

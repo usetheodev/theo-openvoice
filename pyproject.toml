@@ -192,6 +192,10 @@ module = "torch.*"
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
+module = "sounddevice.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
 module = [
     "fastapi",
     "fastapi.*",
@@ -207,6 +211,10 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = "theo.server.routes.*"
 disable_error_code = ["untyped-decorator"]
+
+[[tool.mypy.overrides]]
+module = "theo.server.error_handlers"
+disable_error_code = ["arg-type"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
