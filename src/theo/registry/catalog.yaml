@@ -205,5 +205,6 @@ models:
         load_time_seconds: 3
       engine_config:
         device: "auto"
-        default_voice: "default"
+        default_voice: "af_heart"
         sample_rate: 24000
+        lang_code: "a"
