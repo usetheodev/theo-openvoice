@@ -8,13 +8,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- One-command installer for Linux/macOS via `curl | sh` using `uv` as backbone (#install-scripts)
+- One-command installer for Windows via `irm | iex` using `uv` as backbone (#install-scripts)
+- Docker image build script for CPU and GPU (multi-arch linux/arm64,linux/amd64) (#install-scripts)
+- Linux distribution build script producing pip wheel + Docker images (#install-scripts)
+- Shared build environment script `scripts/env.sh` with VERSION, PLATFORM, DOCKER_REPO vars (#install-scripts)
+- Root `install.sh` redirect to `scripts/install.sh` for quick install UX (#install-scripts)
+- NVIDIA GPU detection in install scripts with automatic `faster-whisper` extras installation (#install-scripts)
+- systemd service setup for Linux installs (configurable via `THEO_NO_SERVICE`) (#install-scripts)
+- Windows uninstall support via `THEO_UNINSTALL=1` environment variable (#install-scripts)
 - Open-source community files (CODE_OF_CONDUCT.md, SECURITY.md) (#release-oss)
 - GitHub issue and pull request templates (#release-oss)
 - Docusaurus documentation site scaffold with initial content (#release-oss)
 
+### Removed
+- Ollama-specific build scripts: `build_darwin.sh`, `build_windows.ps1`, `deduplicate_cuda_libs.sh` (#install-scripts)
+- Ollama-specific deploy scripts: `tag_latest.sh`, `push_docker.sh`, `.this-is-the-create-dmg-repo` (#install-scripts)
+
 ### Fixed
 - Package metadata layout in `pyproject.toml` to keep dependencies out of `project.urls` (#release-oss)
 - Restored `scripts/generate_proto.sh` for CI proto stub verification (#release-oss)
+- Mypy config for optional dependencies in CI (FastAPI, Prometheus, Uvicorn) (#release-oss)
+- Mypy overrides for optional runtime integrations (Silero torch hub, websockets client) (#release-oss)
+- Proto stub imports now use package-relative paths for CI test discovery (#release-oss)
+- Dev dependencies now include FastAPI/Starlette for unit tests (#release-oss)
+- Dev dependencies now include python-multipart for FastAPI form parsing in tests (#release-oss)
+- Dev dependencies now include prometheus_client and huggingface_hub for unit tests (#release-oss)
+- Added GitHub Actions workflows for Docusaurus test/deploy to Pages (#release-oss)
+- Added .nojekyll and trailingSlash config for GitHub Pages deployment (#release-oss)
 
 ## [0.1.0] - 2026-02-10
 

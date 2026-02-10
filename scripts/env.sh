@@ -1,24 +1,21 @@
-# Common environment setup across build*.sh scripts
+#!/bin/sh
+# Common environment setup for Theo OpenVoice build scripts.
+#
+# Sources version from git tags and sets Docker/Python build variables.
+# Used by: build_docker.sh, build_linux.sh
 
-export VERSION=${VERSION:-$(git describe --tags --first-parent --abbrev=7 --long --dirty --always | sed -e "s/^v//g")}
-export GOFLAGS="'-ldflags=-w -s \"-X=github.com/ollama/ollama/version.Version=$VERSION\" \"-X=github.com/ollama/ollama/server.mode=release\"'"
-# TODO - consider `docker buildx ls --format=json` to autodiscover platform capability
-PLATFORM=${PLATFORM:-"linux/arm64,linux/amd64"}
-DOCKER_ORG=${DOCKER_ORG:-"ollama"}
-FINAL_IMAGE_REPO=${FINAL_IMAGE_REPO:-"${DOCKER_ORG}/ollama"}
-OLLAMA_COMMON_BUILD_ARGS="--build-arg=VERSION \
-    --build-arg=GOFLAGS \
-    --build-arg=OLLAMA_CUSTOM_CPU_DEFS \
-    --build-arg=OLLAMA_SKIP_CUDA_GENERATE \
-    --build-arg=OLLAMA_SKIP_CUDA_12_GENERATE \
-    --build-arg=CUDA_V12_ARCHITECTURES \
-    --build-arg=OLLAMA_SKIP_ROCM_GENERATE \
-    --build-arg=OLLAMA_FAST_BUILD \
-    --build-arg=CUSTOM_CPU_FLAGS \
-    --build-arg=GPU_RUNNER_CPU_FLAGS \
-    --build-arg=PARALLEL \
-    --build-arg=AMDGPU_TARGETS"
+set -eu
 
-echo "Building Ollama"
+export VERSION=${VERSION:-$(git describe --tags --first-parent --abbrev=7 --long --dirty --always 2>/dev/null | sed -e "s/^v//g" || echo "0.0.0-dev")}
+export PYTHON_VERSION=${PYTHON_VERSION:-"3.12"}
+export PLATFORM=${PLATFORM:-"linux/arm64,linux/amd64"}
+export DOCKER_ORG=${DOCKER_ORG:-"usetheo"}
+export DOCKER_REPO=${DOCKER_REPO:-"${DOCKER_ORG}/theo-openvoice"}
+
+THEO_COMMON_BUILD_ARGS="--build-arg=VERSION \
+    --build-arg=PYTHON_VERSION"
+
+echo "Building Theo OpenVoice"
 echo "VERSION=$VERSION"
+echo "PYTHON_VERSION=$PYTHON_VERSION"
 echo "PLATFORM=$PLATFORM"
