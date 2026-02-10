@@ -130,7 +130,7 @@ async def _stream_microphone_async(
     import queue
 
     import sounddevice as sd
-    from websockets.client import connect as ws_connect  # type: ignore[attr-defined]
+    from websockets.client import connect as ws_connect
 
     sample_rate = 16000
     frame_duration_ms = 40

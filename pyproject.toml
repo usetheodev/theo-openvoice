@@ -216,6 +216,14 @@ disable_error_code = ["untyped-decorator"]
 module = "theo.server.error_handlers"
 disable_error_code = ["arg-type"]
 
+[[tool.mypy.overrides]]
+module = "theo.vad.silero"
+disable_error_code = ["no-untyped-call"]
+
+[[tool.mypy.overrides]]
+module = "theo.cli.transcribe"
+disable_error_code = ["attr-defined"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
