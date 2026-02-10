@@ -129,7 +129,7 @@ class SileroVADClassifier:
                 return
 
             try:
-                import torch  # type: ignore[import-not-found,unused-ignore]
+                import torch
 
                 model, _utils = torch.hub.load(  # type: ignore[no-untyped-call]
                     repo_or_dir="snakers4/silero-vad",
