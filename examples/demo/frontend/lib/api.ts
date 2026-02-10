@@ -156,13 +156,22 @@ export async function cancelJob(requestId: string): Promise<void> {
 // --- Streaming STT via WebSocket ---
 
 export interface StreamingSTTCallbacks {
+  // STT events
   onSessionCreated?: (data: Record<string, unknown>) => void;
   onVadSpeechStart?: () => void;
   onVadSpeechEnd?: () => void;
   onTranscriptPartial?: (text: string, segmentId: number) => void;
   onTranscriptFinal?: (text: string, segmentId: number) => void;
-  onError?: (message: string) => void;
+  onError?: (message: string, recoverable?: boolean) => void;
   onClose?: () => void;
+  // TTS events (full-duplex)
+  onTtsSpeakingStart?: (requestId: string) => void;
+  onTtsSpeakingEnd?: (requestId: string, cancelled: boolean) => void;
+  onTtsAudio?: (audioData: ArrayBuffer) => void;
+  // Session events
+  onSessionHold?: () => void;
+  onRateLimit?: (delayMs: number) => void;
+  onFramesDropped?: (droppedMs: number) => void;
 }
 
 export function createRealtimeConnection(
@@ -175,7 +184,15 @@ export function createRealtimeConnection(
 
   const ws = new WebSocket(`${wsBaseUrl()}/api/v1/realtime?${params.toString()}`);
 
+  ws.binaryType = "arraybuffer";
+
   ws.onmessage = (event) => {
+    // Binary frames = TTS audio (server -> client)
+    if (event.data instanceof ArrayBuffer) {
+      callbacks.onTtsAudio?.(event.data);
+      return;
+    }
+
     if (typeof event.data === "string") {
       try {
         const msg = JSON.parse(event.data) as Record<string, unknown>;
@@ -196,8 +213,29 @@ export function createRealtimeConnection(
           case "transcript.final":
             callbacks.onTranscriptFinal?.(msg.text as string, msg.segment_id as number);
             break;
+          case "tts.speaking_start":
+            callbacks.onTtsSpeakingStart?.(msg.request_id as string);
+            break;
+          case "tts.speaking_end":
+            callbacks.onTtsSpeakingEnd?.(
+              msg.request_id as string,
+              (msg.cancelled as boolean) ?? false,
+            );
+            break;
+          case "session.hold":
+            callbacks.onSessionHold?.();
+            break;
+          case "session.rate_limit":
+            callbacks.onRateLimit?.(msg.delay_ms as number);
+            break;
+          case "session.frames_dropped":
+            callbacks.onFramesDropped?.(msg.dropped_ms as number);
+            break;
           case "error":
-            callbacks.onError?.(msg.message as string);
+            callbacks.onError?.(
+              msg.message as string,
+              msg.recoverable as boolean | undefined,
+            );
             break;
         }
       } catch {
@@ -226,6 +264,27 @@ export interface SpeechPayload {
   speed?: number;
   response_format?: "wav" | "pcm";
 }
+
+// --- Streaming TTS helpers (via WebSocket) ---
+
+export function sendTtsSpeak(ws: WebSocket, text: string, voice?: string): void {
+  if (ws.readyState !== WebSocket.OPEN) return;
+  ws.send(
+    JSON.stringify({
+      type: "tts.speak",
+      text,
+      voice: voice ?? "default",
+      request_id: `req_${Date.now()}`,
+    }),
+  );
+}
+
+export function sendTtsCancel(ws: WebSocket): void {
+  if (ws.readyState !== WebSocket.OPEN) return;
+  ws.send(JSON.stringify({ type: "tts.cancel" }));
+}
+
+// --- TTS via REST ---
 
 export async function synthesizeSpeech(payload: SpeechPayload): Promise<Blob> {
   const response = await fetch(`${baseUrl()}/api/v1/audio/speech`, {

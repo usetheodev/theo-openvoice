@@ -24,6 +24,7 @@ from theo.preprocessing.resample import ResampleStage
 from theo.registry.registry import ModelRegistry
 from theo.scheduler.queue import RequestPriority
 from theo.scheduler.scheduler import Scheduler
+from theo.scheduler.streaming import StreamingGRPCClient
 from theo.server.error_handlers import register_error_handlers
 from theo.server.models.requests import TranscribeRequest
 from theo.server.routes import health, realtime, speech, transcriptions, translations
@@ -127,12 +128,20 @@ def create_demo_app(config: DemoConfig | None = None) -> FastAPI:
             batch_max_size=settings.batch_max_size,
         )
 
+        streaming_grpc_client: StreamingGRPCClient | None = None
+        if stt_manifests:
+            first_stt_port = settings.worker_base_port
+            streaming_grpc_client = StreamingGRPCClient(f"localhost:{first_stt_port}")
+            await streaming_grpc_client.connect()
+            logger.info("demo_streaming_grpc_connected", port=first_stt_port)
+
         job_store = DemoJobStore()
         app.state.registry = registry
         app.state.scheduler = scheduler
         app.state.worker_manager = worker_manager
         app.state.preprocessing_pipeline = preprocessing_pipeline
         app.state.postprocessing_pipeline = postprocessing_pipeline
+        app.state.streaming_grpc_client = streaming_grpc_client
         app.state.demo_jobs = job_store
         app.state.demo_tasks: set[asyncio.Task[Any]] = set()
 
@@ -144,6 +153,9 @@ def create_demo_app(config: DemoConfig | None = None) -> FastAPI:
                 task.cancel()
             if tasks:
                 await asyncio.gather(*tasks, return_exceptions=True)
+
+            if streaming_grpc_client is not None:
+                await streaming_grpc_client.close()
 
             await scheduler.stop()
             await worker_manager.stop_all()

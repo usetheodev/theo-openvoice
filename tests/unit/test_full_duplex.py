@@ -71,7 +71,7 @@ def _make_mock_registry(has_tts: bool = True, model_name: str = "kokoro-v1") -> 
         manifest.model_type = ModelType.TTS
         manifest.name = model_name
         registry.get_manifest.return_value = manifest
-        registry.list_models.return_value = [model_name]
+        registry.list_models.return_value = [manifest]
     else:
         from theo.exceptions import ModelNotFoundError
 

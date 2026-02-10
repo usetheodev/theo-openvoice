@@ -140,3 +140,36 @@ body {
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: translateY(0); }
 }
+
+/* Fade + slide animation for transcript entries and model cards */
+@keyframes fadeSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.fade-slide-in {
+  animation: fadeSlideIn 0.25s ease-out;
+}
+
+/* Mute-on-speak indicator — pulsing orange border */
+@keyframes mutePulse {
+  0%, 100% {
+    border-color: hsl(25 95% 53% / 0.4);
+    box-shadow: 0 0 0 0 hsl(25 95% 53% / 0.1);
+  }
+  50% {
+    border-color: hsl(25 95% 53% / 0.7);
+    box-shadow: 0 0 0 4px hsl(25 95% 53% / 0.05);
+  }
+}
+
+.mute-indicator {
+  animation: mutePulse 2s ease-in-out infinite;
+  border-color: hsl(25 95% 53% / 0.5);
+}

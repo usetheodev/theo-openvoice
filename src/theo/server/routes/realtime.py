@@ -311,13 +311,9 @@ async def _tts_speak_task(
         if model_tts is None:
             # Procurar qualquer modelo TTS registrado
             for m in registry.list_models():
-                try:
-                    manifest = registry.get_manifest(m)
-                    if manifest.model_type == ModelType.TTS:
-                        model_tts = m
-                        break
-                except ModelNotFoundError:
-                    continue
+                if m.model_type == ModelType.TTS:
+                    model_tts = m.name
+                    break
             if model_tts is None:
                 await send_event(
                     StreamingErrorEvent(

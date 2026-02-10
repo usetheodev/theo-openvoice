@@ -183,9 +183,7 @@ class TestRoundtripTTSSTT:
         assert len(pcm_16k) > 0, "Resample retornou audio vazio"
 
         # STT: PCM 16-bit 16kHz -> text
-        transcribed = await self._transcribe_audio(
-            stt_backend, pcm_16k, language=language
-        )
+        transcribed = await self._transcribe_audio(stt_backend, pcm_16k, language=language)
 
         overlap = _word_overlap_ratio(text, transcribed)
         return transcribed, overlap
@@ -248,11 +246,13 @@ class TestRoundtripTTSSTT:
         results: list[dict[str, object]] = []
         for phrase in phrases:
             transcribed, overlap = await self._roundtrip(tts_backend, stt_backend, phrase)
-            results.append({
-                "original": phrase,
-                "transcribed": transcribed,
-                "overlap": overlap,
-            })
+            results.append(
+                {
+                    "original": phrase,
+                    "transcribed": transcribed,
+                    "overlap": overlap,
+                }
+            )
 
         # Imprimir relatorio para analise humana
         print("\n" + "=" * 70)

@@ -129,9 +129,9 @@ class SileroVADClassifier:
                 return
 
             try:
-                import torch  # type: ignore[import-not-found]
+                import torch  # type: ignore[import-not-found,unused-ignore]
 
-                model, _utils = torch.hub.load(
+                model, _utils = torch.hub.load(  # type: ignore[no-untyped-call]
                     repo_or_dir="snakers4/silero-vad",
                     model="silero_vad",
                     force_reload=False,
@@ -147,18 +147,33 @@ class SileroVADClassifier:
     def get_speech_probability(self, frame: np.ndarray) -> float:
         """Calcula probabilidade de fala para um frame de audio.
 
+        Se o frame for maior que 512 samples, e dividido em sub-frames
+        de 512 samples e processado sequencialmente (preservando estado
+        interno do Silero). Retorna a probabilidade maxima entre sub-frames.
+
         Args:
             frame: Array numpy float32 mono, 16kHz.
-                   Tamanho recomendado: 512 samples (32ms) ou 1024 (64ms).
 
         Returns:
             Probabilidade de fala entre 0.0 e 1.0.
         """
         self._ensure_model_loaded()
 
-        tensor = self._to_tensor(frame) if self._to_tensor is not None else frame
-        prob = self._model(tensor, self._sample_rate)  # type: ignore[misc, operator]
-        return float(prob.item())
+        chunk_size = 512
+        if len(frame) <= chunk_size:
+            tensor = self._to_tensor(frame) if self._to_tensor is not None else frame
+            prob = self._model(tensor, self._sample_rate)  # type: ignore[misc, operator]
+            return float(prob.item())
+
+        max_prob = 0.0
+        for offset in range(0, len(frame), chunk_size):
+            sub_frame = frame[offset : offset + chunk_size]
+            if len(sub_frame) < chunk_size:
+                break
+            tensor = self._to_tensor(sub_frame) if self._to_tensor is not None else sub_frame
+            prob = self._model(tensor, self._sample_rate)  # type: ignore[misc, operator]
+            max_prob = max(max_prob, float(prob.item()))
+        return max_prob
 
     def is_speech(self, frame: np.ndarray) -> bool:
         """Verifica se frame contem fala (prob > threshold).
