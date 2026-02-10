@@ -1,4 +1,4 @@
-"""Health check endpoints."""
+"""Health check and models list endpoints."""
 
 from __future__ import annotations
 
@@ -29,3 +29,26 @@ async def health(request: Request) -> dict[str, Any]:
         response["models_loaded"] = len(models)
 
     return response
+
+
+@router.get("/v1/models")
+async def list_models(request: Request) -> dict[str, Any]:
+    """Lista modelos carregados no servidor.
+
+    Usado pelo comando `theo ps`.
+    """
+    registry = getattr(request.app.state, "registry", None)
+    if registry is None:
+        return {"models": []}
+
+    manifests = registry.list_models()
+    models: list[dict[str, Any]] = []
+    for m in manifests:
+        models.append({
+            "name": m.name,
+            "type": m.model_type.value,
+            "engine": m.engine,
+            "status": "loaded",
+        })
+
+    return {"models": models}

@@ -61,7 +61,7 @@ def pull(model_name: str, models_dir: str, force: bool) -> None:
 
     if downloader.is_installed(model_name) and not force:
         click.echo(f"Modelo '{model_name}' ja esta instalado.")
-        click.echo(f"Use --force para reinstalar.")
+        click.echo("Use --force para reinstalar.")
         return
 
     click.echo(f"Baixando {model_name} de {entry.repo}...")
@@ -76,4 +76,4 @@ def pull(model_name: str, models_dir: str, force: bool) -> None:
         sys.exit(1)
 
     click.echo(f"Modelo instalado em {model_dir}")
-    click.echo(f"Execute 'theo serve' para iniciar o servidor.")
+    click.echo("Execute 'theo serve' para iniciar o servidor.")

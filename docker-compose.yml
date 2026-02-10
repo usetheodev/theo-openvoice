@@ -1,0 +1,13 @@
+services:
+  theo:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - theo-models:/root/.theo/models
+    environment:
+      - THEO_LOG_FORMAT=json
+    restart: unless-stopped
+
+volumes:
+  theo-models:

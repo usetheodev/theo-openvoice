@@ -40,10 +40,9 @@ def remove(model_name: str, models_dir: str, yes: bool) -> None:
         click.echo(f"Erro: modelo '{model_name}' nao esta instalado.", err=True)
         sys.exit(1)
 
-    if not yes:
-        if not click.confirm(f"Remover modelo '{model_name}'?"):
-            click.echo("Cancelado.")
-            return
+    if not yes and not click.confirm(f"Remover modelo '{model_name}'?"):
+        click.echo("Cancelado.")
+        return
 
     removed = downloader.remove(model_name)
     if removed:

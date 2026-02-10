@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+from unittest.mock import MagicMock, patch
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
 from click.testing import CliRunner
 
 from theo.cli import cli
@@ -28,6 +34,16 @@ class TestTranscribeCommand:
         assert "--language" in result.output
         assert "--server" in result.output
 
+    def test_transcribe_help_shows_hot_words(self) -> None:
+        runner = CliRunner()
+        result = runner.invoke(cli, ["transcribe", "--help"])
+        assert "--hot-words" in result.output
+
+    def test_transcribe_help_shows_no_itn(self) -> None:
+        runner = CliRunner()
+        result = runner.invoke(cli, ["transcribe", "--help"])
+        assert "--no-itn" in result.output
+
     def test_transcribe_format_choices(self) -> None:
         runner = CliRunner()
         result = runner.invoke(cli, ["transcribe", "--help"])
@@ -47,8 +63,7 @@ class TestTranscribeCommand:
             "nao encontrado" in result.output.lower() or "nao disponivel" in result.output.lower()
         )
 
-    def test_transcribe_server_not_running(self, tmp_path: object) -> None:
-        # Cria arquivo fake para passar a validacao de arquivo
+    def test_transcribe_server_not_running(self, tmp_path: Path) -> None:
         import pathlib
 
         audio_file = pathlib.Path(str(tmp_path)) / "audio.wav"
@@ -68,6 +83,153 @@ class TestTranscribeCommand:
         )
         assert result.exit_code != 0
         assert "theo serve" in result.output.lower() or "nao disponivel" in result.output.lower()
+
+    @patch("httpx.post")
+    def test_transcribe_sends_hot_words(
+        self, mock_post: MagicMock, tmp_path: Path
+    ) -> None:
+        import pathlib
+
+        audio_file = pathlib.Path(str(tmp_path)) / "audio.wav"
+        audio_file.write_bytes(b"fake audio data")
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.headers = {"content-type": "application/json"}
+        mock_response.json.return_value = {"text": "PIX transferencia"}
+        mock_post.return_value = mock_response
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            [
+                "transcribe",
+                str(audio_file),
+                "--model",
+                "faster-whisper-tiny",
+                "--hot-words",
+                "PIX,TED,Selic",
+            ],
+        )
+        assert result.exit_code == 0
+        assert "PIX transferencia" in result.output
+        # Verify hot_words was passed in form data
+        call_kwargs = mock_post.call_args
+        assert call_kwargs is not None
+        data = call_kwargs.kwargs.get("data", {})
+        assert data.get("hot_words") == "PIX,TED,Selic"
+
+    @patch("httpx.post")
+    def test_transcribe_sends_no_itn(
+        self, mock_post: MagicMock, tmp_path: Path
+    ) -> None:
+        import pathlib
+
+        audio_file = pathlib.Path(str(tmp_path)) / "audio.wav"
+        audio_file.write_bytes(b"fake audio data")
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.headers = {"content-type": "application/json"}
+        mock_response.json.return_value = {"text": "dois mil"}
+        mock_post.return_value = mock_response
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            [
+                "transcribe",
+                str(audio_file),
+                "--model",
+                "faster-whisper-tiny",
+                "--no-itn",
+            ],
+        )
+        assert result.exit_code == 0
+        call_kwargs = mock_post.call_args
+        assert call_kwargs is not None
+        data = call_kwargs.kwargs.get("data", {})
+        assert data.get("itn") == "false"
+
+
+    def test_transcribe_help_shows_stream(self) -> None:
+        runner = CliRunner()
+        result = runner.invoke(cli, ["transcribe", "--help"])
+        assert "--stream" in result.output
+
+    def test_transcribe_no_file_no_stream_shows_error(self) -> None:
+        runner = CliRunner()
+        result = runner.invoke(
+            cli, ["transcribe", "--model", "faster-whisper-tiny"]
+        )
+        assert result.exit_code != 0
+        assert "--stream" in result.output
+
+    @patch("theo.cli.transcribe._stream_microphone")
+    def test_transcribe_stream_calls_stream_microphone(
+        self, mock_stream: MagicMock,
+    ) -> None:
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["transcribe", "--stream", "--model", "faster-whisper-tiny"],
+        )
+        assert result.exit_code == 0
+        mock_stream.assert_called_once()
+        call_kwargs = mock_stream.call_args.kwargs
+        assert call_kwargs["model"] == "faster-whisper-tiny"
+        assert call_kwargs["itn"] is True
+
+    @patch("theo.cli.transcribe._stream_microphone")
+    def test_transcribe_stream_passes_hot_words(
+        self, mock_stream: MagicMock,
+    ) -> None:
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            [
+                "transcribe", "--stream",
+                "--model", "faster-whisper-tiny",
+                "--hot-words", "PIX,TED",
+            ],
+        )
+        assert result.exit_code == 0
+        call_kwargs = mock_stream.call_args.kwargs
+        assert call_kwargs["hot_words"] == "PIX,TED"
+
+    @patch("theo.cli.transcribe._stream_microphone")
+    def test_transcribe_stream_passes_no_itn(
+        self, mock_stream: MagicMock,
+    ) -> None:
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            [
+                "transcribe", "--stream",
+                "--model", "faster-whisper-tiny",
+                "--no-itn",
+            ],
+        )
+        assert result.exit_code == 0
+        call_kwargs = mock_stream.call_args.kwargs
+        assert call_kwargs["itn"] is False
+
+    @patch("theo.cli.transcribe._stream_microphone")
+    def test_transcribe_stream_passes_language(
+        self, mock_stream: MagicMock,
+    ) -> None:
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            [
+                "transcribe", "--stream",
+                "--model", "faster-whisper-tiny",
+                "--language", "pt",
+            ],
+        )
+        assert result.exit_code == 0
+        call_kwargs = mock_stream.call_args.kwargs
+        assert call_kwargs["language"] == "pt"
 
 
 class TestTranslateCommand:
@@ -90,3 +252,46 @@ class TestTranslateCommand:
         assert "--server" in result.output
         # translate nao tem --language (sempre traduz para ingles)
         assert "--language" not in result.output
+
+    def test_translate_help_shows_hot_words(self) -> None:
+        runner = CliRunner()
+        result = runner.invoke(cli, ["translate", "--help"])
+        assert "--hot-words" in result.output
+
+    def test_translate_help_shows_no_itn(self) -> None:
+        runner = CliRunner()
+        result = runner.invoke(cli, ["translate", "--help"])
+        assert "--no-itn" in result.output
+
+    @patch("httpx.post")
+    def test_translate_sends_hot_words(
+        self, mock_post: MagicMock, tmp_path: Path
+    ) -> None:
+        import pathlib
+
+        audio_file = pathlib.Path(str(tmp_path)) / "audio.wav"
+        audio_file.write_bytes(b"fake audio data")
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.headers = {"content-type": "application/json"}
+        mock_response.json.return_value = {"text": "PIX transfer"}
+        mock_post.return_value = mock_response
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            [
+                "translate",
+                str(audio_file),
+                "--model",
+                "faster-whisper-tiny",
+                "--hot-words",
+                "PIX,TED",
+            ],
+        )
+        assert result.exit_code == 0
+        call_kwargs = mock_post.call_args
+        assert call_kwargs is not None
+        data = call_kwargs.kwargs.get("data", {})
+        assert data.get("hot_words") == "PIX,TED"

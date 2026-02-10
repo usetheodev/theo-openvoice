@@ -20,6 +20,7 @@ def _post_audio(
     response_format: str,
     language: str | None,
     itn: bool = True,
+    hot_words: str | None = None,
 ) -> None:
     """Envia audio para o server via HTTP e imprime resultado."""
     import httpx
@@ -35,6 +36,8 @@ def _post_audio(
         data["language"] = language
     if not itn:
         data["itn"] = "false"
+    if hot_words:
+        data["hot_words"] = hot_words
 
     try:
         with file_path.open("rb") as f:
@@ -74,8 +77,209 @@ def _post_audio(
         click.echo(response.text)
 
 
+def _stream_microphone(
+    server_url: str,
+    model: str,
+    language: str | None,
+    hot_words: str | None,
+    itn: bool,
+) -> None:
+    """Conecta ao WebSocket e transcreve audio do microfone em tempo real."""
+    try:
+        import sounddevice  # noqa: F401
+    except ImportError:
+        click.echo(
+            "Erro: sounddevice nao esta instalado. "
+            "Instale com: pip install theo-openvoice[stream]",
+            err=True,
+        )
+        sys.exit(1)
+
+    try:
+        import websockets  # noqa: F401
+    except ImportError:
+        click.echo(
+            "Erro: websockets nao esta instalado. "
+            "Instale com: pip install theo-openvoice[stream]",
+            err=True,
+        )
+        sys.exit(1)
+
+    import asyncio
+
+    asyncio.run(_stream_microphone_async(
+        server_url=server_url,
+        model=model,
+        language=language,
+        hot_words=hot_words,
+        itn=itn,
+    ))
+
+
+async def _stream_microphone_async(
+    server_url: str,
+    model: str,
+    language: str | None,
+    hot_words: str | None,
+    itn: bool,
+) -> None:
+    """Implementacao async do streaming de microfone via WebSocket."""
+    import asyncio
+    import json
+    import queue
+
+    import sounddevice as sd
+    from websockets.client import connect as ws_connect  # type: ignore[attr-defined]
+
+    sample_rate = 16000
+    frame_duration_ms = 40
+    frame_size = int(sample_rate * frame_duration_ms / 1000)
+    audio_queue: queue.Queue[bytes] = queue.Queue()
+
+    def audio_callback(
+        indata: object, frames: int, time_info: object, status: object,
+    ) -> None:
+        import numpy as np
+
+        data = np.asarray(indata)
+        pcm_bytes = (data * 32767).astype(np.int16).tobytes()
+        audio_queue.put(pcm_bytes)
+
+    # Build WebSocket URL
+    ws_url = server_url.replace("http://", "ws://").replace("https://", "wss://")
+    ws_url = f"{ws_url}/v1/realtime?model={model}"
+    if language:
+        ws_url += f"&language={language}"
+
+    click.echo(f"Conectando a {ws_url} ...")
+    click.echo("Pressione Ctrl+C para encerrar.\n")
+
+    last_partial = ""
+
+    try:
+        async with ws_connect(ws_url) as ws:
+            # Send session.configure if needed
+            config: dict[str, object] = {}
+            if hot_words:
+                config["hot_words"] = hot_words.split(",")
+            if not itn:
+                config["enable_itn"] = False
+            if config:
+                config["type"] = "session.configure"
+                await ws.send(json.dumps(config))
+
+            # Wait for session.created
+            msg = await asyncio.wait_for(ws.recv(), timeout=10.0)
+            event = json.loads(msg)
+            if event.get("type") == "session.created":
+                session_id = event.get("session_id", "?")
+                click.echo(f"Sessao criada: {session_id}")
+            else:
+                click.echo(f"Evento inesperado: {event.get('type')}", err=True)
+
+            stop_event = asyncio.Event()
+
+            async def send_audio() -> None:
+                """Envia frames de audio do microfone via WebSocket."""
+                while not stop_event.is_set():
+                    try:
+                        data = audio_queue.get_nowait()
+                        await ws.send(data)
+                    except queue.Empty:
+                        await asyncio.sleep(0.01)
+
+            async def receive_events() -> None:
+                """Recebe e exibe eventos do servidor."""
+                nonlocal last_partial
+                async for raw_msg in ws:
+                    if isinstance(raw_msg, bytes):
+                        # TTS audio — ignore in CLI
+                        continue
+                    event = json.loads(raw_msg)
+                    event_type = event.get("type", "")
+
+                    if event_type == "transcript.partial":
+                        text = event.get("text", "")
+                        if text != last_partial:
+                            # Clear line and show partial
+                            click.echo(f"\r\033[K  ... {text}", nl=False)
+                            last_partial = text
+
+                    elif event_type == "transcript.final":
+                        text = event.get("text", "")
+                        # Clear partial line and show final
+                        click.echo(f"\r\033[K> {text}")
+                        last_partial = ""
+
+                    elif event_type == "vad.speech_start":
+                        pass  # Visual feedback could be added
+
+                    elif event_type == "vad.speech_end":
+                        pass
+
+                    elif event_type == "error":
+                        msg_text = event.get("message", "erro desconhecido")
+                        recoverable = event.get("recoverable", False)
+                        if recoverable:
+                            click.echo(f"\n[recuperando] {msg_text}", err=True)
+                        else:
+                            click.echo(f"\n[erro] {msg_text}", err=True)
+                            stop_event.set()
+                            return
+
+                    elif event_type == "session.closed":
+                        stop_event.set()
+                        return
+
+            # Start microphone capture
+            stream = sd.InputStream(
+                samplerate=sample_rate,
+                channels=1,
+                dtype="float32",
+                blocksize=frame_size,
+                callback=audio_callback,
+            )
+            stream.start()
+
+            try:
+                send_task = asyncio.create_task(send_audio())
+                recv_task = asyncio.create_task(receive_events())
+
+                # Wait for either to finish (error/close) or KeyboardInterrupt
+                _done, pending = await asyncio.wait(
+                    [send_task, recv_task],
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                for task in pending:
+                    task.cancel()
+
+            finally:
+                stream.stop()
+                stream.close()
+
+                # Send session.close
+                import contextlib
+
+                with contextlib.suppress(Exception):
+                    await ws.send(json.dumps({"type": "session.close"}))
+
+    except KeyboardInterrupt:
+        click.echo("\n\nSessao encerrada.")
+    except ConnectionRefusedError:
+        click.echo(
+            f"Erro: servidor nao disponivel em {server_url}. Execute 'theo serve' primeiro.",
+            err=True,
+        )
+        sys.exit(1)
+    except Exception as exc:
+        click.echo(f"\nErro: {exc}", err=True)
+        sys.exit(1)
+
+    click.echo("\nFinalizado.")
+
+
 @cli.command()
-@click.argument("file", type=click.Path(exists=False))
+@click.argument("file", type=click.Path(exists=False), required=False, default=None)
 @click.option("--model", "-m", required=True, help="Nome do modelo STT.")
 @click.option(
     "--format",
@@ -93,20 +297,47 @@ def _post_audio(
     help="Desabilita Inverse Text Normalization.",
 )
 @click.option(
+    "--hot-words",
+    default=None,
+    help="Lista de hot words separadas por virgula (ex: PIX,TED,Selic).",
+)
+@click.option(
+    "--stream",
+    is_flag=True,
+    default=False,
+    help="Streaming em tempo real do microfone via WebSocket.",
+)
+@click.option(
     "--server",
     default=DEFAULT_SERVER_URL,
     show_default=True,
     help="URL do servidor Theo.",
 )
 def transcribe(
-    file: str,
+    file: str | None,
     model: str,
     response_format: str,
     language: str | None,
     no_itn: bool,
+    hot_words: str | None,
+    stream: bool,
     server: str,
 ) -> None:
     """Transcreve um arquivo de audio."""
+    if stream:
+        _stream_microphone(
+            server_url=server,
+            model=model,
+            language=language,
+            hot_words=hot_words,
+            itn=not no_itn,
+        )
+        return
+
+    if file is None:
+        click.echo("Erro: FILE e obrigatorio (ou use --stream para microfone).", err=True)
+        sys.exit(1)
+
     _post_audio(
         server_url=server,
         endpoint="/v1/audio/transcriptions",
@@ -115,6 +346,7 @@ def transcribe(
         response_format=response_format,
         language=language,
         itn=not no_itn,
+        hot_words=hot_words,
     )
 
 
@@ -136,6 +368,11 @@ def transcribe(
     help="Desabilita Inverse Text Normalization.",
 )
 @click.option(
+    "--hot-words",
+    default=None,
+    help="Lista de hot words separadas por virgula (ex: PIX,TED,Selic).",
+)
+@click.option(
     "--server",
     default=DEFAULT_SERVER_URL,
     show_default=True,
@@ -146,6 +383,7 @@ def translate(
     model: str,
     response_format: str,
     no_itn: bool,
+    hot_words: str | None,
     server: str,
 ) -> None:
     """Traduz um arquivo de audio para ingles."""
@@ -157,4 +395,5 @@ def translate(
         response_format=response_format,
         language=None,
         itn=not no_itn,
+        hot_words=hot_words,
     )
