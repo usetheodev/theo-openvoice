@@ -6,7 +6,6 @@ import uvicorn
 
 from theo.logging import configure_logging
 
-from .app import app
 from .config import DemoConfig
 
 

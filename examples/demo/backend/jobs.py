@@ -5,10 +5,11 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import dataclass, field
-from typing import Any, Iterable
+from typing import TYPE_CHECKING, Any
 
-from theo._types import BatchResult, SegmentDetail, WordTimestamp
-from theo.scheduler.queue import RequestPriority
+if TYPE_CHECKING:
+    from theo._types import BatchResult, SegmentDetail, WordTimestamp
+    from theo.scheduler.queue import RequestPriority
 
 
 @dataclass(slots=True)

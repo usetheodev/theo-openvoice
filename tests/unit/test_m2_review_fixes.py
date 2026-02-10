@@ -436,7 +436,10 @@ class TestFix5TasksAwaitedAfterCancel:
             )
 
             mock_spawn.assert_called_once_with(
-                50072, "faster-whisper", "/models/test", {"device": "cpu"},
+                50072,
+                "faster-whisper",
+                "/models/test",
+                {"device": "cpu"},
                 worker_type="stt",
             )
 

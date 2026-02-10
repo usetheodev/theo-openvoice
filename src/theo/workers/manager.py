@@ -96,9 +96,17 @@ class WorkerManager:
         """
         worker_id = f"{engine}-{port}"
 
-        logger.info("spawning_worker", worker_id=worker_id, port=port, engine=engine, worker_type=worker_type)
+        logger.info(
+            "spawning_worker",
+            worker_id=worker_id,
+            port=port,
+            engine=engine,
+            worker_type=worker_type,
+        )
 
-        process = _spawn_worker_process(port, engine, model_path, engine_config, worker_type=worker_type)
+        process = _spawn_worker_process(
+            port, engine, model_path, engine_config, worker_type=worker_type
+        )
 
         handle = WorkerHandle(
             worker_id=worker_id,
@@ -200,7 +208,9 @@ class WorkerManager:
 
             try:
                 await asyncio.sleep(delay)
-                result = await _check_worker_health(handle.port, timeout=2.0, worker_type=handle.worker_type)
+                result = await _check_worker_health(
+                    handle.port, timeout=2.0, worker_type=handle.worker_type
+                )
                 if result.get("status") == "ok":
                     handle.state = WorkerState.READY
                     logger.info("worker_ready", worker_id=worker_id, elapsed_s=round(elapsed, 2))
@@ -287,7 +297,10 @@ class WorkerManager:
         await asyncio.sleep(backoff)
 
         process = _spawn_worker_process(
-            handle.port, handle.engine, handle.model_path, handle.engine_config,
+            handle.port,
+            handle.engine,
+            handle.model_path,
+            handle.engine_config,
             worker_type=handle.worker_type,
         )
 
@@ -383,7 +396,9 @@ def _spawn_worker_process(
     )
 
 
-async def _check_worker_health(port: int, timeout: float = 2.0, worker_type: str = "stt") -> dict[str, str]:
+async def _check_worker_health(
+    port: int, timeout: float = 2.0, worker_type: str = "stt"
+) -> dict[str, str]:
     """Verifica health de um worker via gRPC Health RPC.
 
     Args:

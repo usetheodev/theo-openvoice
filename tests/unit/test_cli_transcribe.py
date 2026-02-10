@@ -85,9 +85,7 @@ class TestTranscribeCommand:
         assert "theo serve" in result.output.lower() or "nao disponivel" in result.output.lower()
 
     @patch("httpx.post")
-    def test_transcribe_sends_hot_words(
-        self, mock_post: MagicMock, tmp_path: Path
-    ) -> None:
+    def test_transcribe_sends_hot_words(self, mock_post: MagicMock, tmp_path: Path) -> None:
         import pathlib
 
         audio_file = pathlib.Path(str(tmp_path)) / "audio.wav"
@@ -120,9 +118,7 @@ class TestTranscribeCommand:
         assert data.get("hot_words") == "PIX,TED,Selic"
 
     @patch("httpx.post")
-    def test_transcribe_sends_no_itn(
-        self, mock_post: MagicMock, tmp_path: Path
-    ) -> None:
+    def test_transcribe_sends_no_itn(self, mock_post: MagicMock, tmp_path: Path) -> None:
         import pathlib
 
         audio_file = pathlib.Path(str(tmp_path)) / "audio.wav"
@@ -151,7 +147,6 @@ class TestTranscribeCommand:
         data = call_kwargs.kwargs.get("data", {})
         assert data.get("itn") == "false"
 
-
     def test_transcribe_help_shows_stream(self) -> None:
         runner = CliRunner()
         result = runner.invoke(cli, ["transcribe", "--help"])
@@ -159,15 +154,14 @@ class TestTranscribeCommand:
 
     def test_transcribe_no_file_no_stream_shows_error(self) -> None:
         runner = CliRunner()
-        result = runner.invoke(
-            cli, ["transcribe", "--model", "faster-whisper-tiny"]
-        )
+        result = runner.invoke(cli, ["transcribe", "--model", "faster-whisper-tiny"])
         assert result.exit_code != 0
         assert "--stream" in result.output
 
     @patch("theo.cli.transcribe._stream_microphone")
     def test_transcribe_stream_calls_stream_microphone(
-        self, mock_stream: MagicMock,
+        self,
+        mock_stream: MagicMock,
     ) -> None:
         runner = CliRunner()
         result = runner.invoke(
@@ -182,15 +176,19 @@ class TestTranscribeCommand:
 
     @patch("theo.cli.transcribe._stream_microphone")
     def test_transcribe_stream_passes_hot_words(
-        self, mock_stream: MagicMock,
+        self,
+        mock_stream: MagicMock,
     ) -> None:
         runner = CliRunner()
         result = runner.invoke(
             cli,
             [
-                "transcribe", "--stream",
-                "--model", "faster-whisper-tiny",
-                "--hot-words", "PIX,TED",
+                "transcribe",
+                "--stream",
+                "--model",
+                "faster-whisper-tiny",
+                "--hot-words",
+                "PIX,TED",
             ],
         )
         assert result.exit_code == 0
@@ -199,14 +197,17 @@ class TestTranscribeCommand:
 
     @patch("theo.cli.transcribe._stream_microphone")
     def test_transcribe_stream_passes_no_itn(
-        self, mock_stream: MagicMock,
+        self,
+        mock_stream: MagicMock,
     ) -> None:
         runner = CliRunner()
         result = runner.invoke(
             cli,
             [
-                "transcribe", "--stream",
-                "--model", "faster-whisper-tiny",
+                "transcribe",
+                "--stream",
+                "--model",
+                "faster-whisper-tiny",
                 "--no-itn",
             ],
         )
@@ -216,15 +217,19 @@ class TestTranscribeCommand:
 
     @patch("theo.cli.transcribe._stream_microphone")
     def test_transcribe_stream_passes_language(
-        self, mock_stream: MagicMock,
+        self,
+        mock_stream: MagicMock,
     ) -> None:
         runner = CliRunner()
         result = runner.invoke(
             cli,
             [
-                "transcribe", "--stream",
-                "--model", "faster-whisper-tiny",
-                "--language", "pt",
+                "transcribe",
+                "--stream",
+                "--model",
+                "faster-whisper-tiny",
+                "--language",
+                "pt",
             ],
         )
         assert result.exit_code == 0
@@ -264,9 +269,7 @@ class TestTranslateCommand:
         assert "--no-itn" in result.output
 
     @patch("httpx.post")
-    def test_translate_sends_hot_words(
-        self, mock_post: MagicMock, tmp_path: Path
-    ) -> None:
+    def test_translate_sends_hot_words(self, mock_post: MagicMock, tmp_path: Path) -> None:
         import pathlib
 
         audio_file = pathlib.Path(str(tmp_path)) / "audio.wav"

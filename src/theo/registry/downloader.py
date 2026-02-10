@@ -69,10 +69,7 @@ class ModelDownloader:
         try:
             from huggingface_hub import snapshot_download
         except ImportError:
-            msg = (
-                "huggingface_hub nao esta instalado. "
-                "Instale com: pip install huggingface_hub"
-            )
+            msg = "huggingface_hub nao esta instalado. Instale com: pip install huggingface_hub"
             raise RuntimeError(msg) from None
 
         model_dir = self._models_dir / entry.name

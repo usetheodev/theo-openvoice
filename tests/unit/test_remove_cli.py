@@ -65,9 +65,7 @@ class TestRemoveCommand:
         assert "Cancelado" in result.output
         mock_downloader.remove.assert_not_called()
 
-    def test_remove_not_installed(
-        self, mock_downloader_cls: MagicMock, tmp_path: Path
-    ) -> None:
+    def test_remove_not_installed(self, mock_downloader_cls: MagicMock, tmp_path: Path) -> None:
         mock_downloader = MagicMock()
         mock_downloader_cls.return_value = mock_downloader
         mock_downloader.is_installed.return_value = False
@@ -80,9 +78,7 @@ class TestRemoveCommand:
         assert result.exit_code == 1
         assert "nao esta instalado" in result.output
 
-    def test_remove_fails(
-        self, mock_downloader_cls: MagicMock, tmp_path: Path
-    ) -> None:
+    def test_remove_fails(self, mock_downloader_cls: MagicMock, tmp_path: Path) -> None:
         mock_downloader = MagicMock()
         mock_downloader_cls.return_value = mock_downloader
         mock_downloader.is_installed.return_value = True

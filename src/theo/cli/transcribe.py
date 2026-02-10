@@ -99,21 +99,22 @@ def _stream_microphone(
         import websockets  # noqa: F401
     except ImportError:
         click.echo(
-            "Erro: websockets nao esta instalado. "
-            "Instale com: pip install theo-openvoice[stream]",
+            "Erro: websockets nao esta instalado. Instale com: pip install theo-openvoice[stream]",
             err=True,
         )
         sys.exit(1)
 
     import asyncio
 
-    asyncio.run(_stream_microphone_async(
-        server_url=server_url,
-        model=model,
-        language=language,
-        hot_words=hot_words,
-        itn=itn,
-    ))
+    asyncio.run(
+        _stream_microphone_async(
+            server_url=server_url,
+            model=model,
+            language=language,
+            hot_words=hot_words,
+            itn=itn,
+        )
+    )
 
 
 async def _stream_microphone_async(
@@ -137,7 +138,10 @@ async def _stream_microphone_async(
     audio_queue: queue.Queue[bytes] = queue.Queue()
 
     def audio_callback(
-        indata: object, frames: int, time_info: object, status: object,
+        indata: object,
+        frames: int,
+        time_info: object,
+        status: object,
     ) -> None:
         import numpy as np
 

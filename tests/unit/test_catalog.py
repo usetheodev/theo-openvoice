@@ -227,6 +227,4 @@ class TestDefaultCatalog:
         catalog = ModelCatalog()
         catalog.load()
         for entry in catalog.list_models():
-            assert "name" in entry.manifest, (
-                f"Entry {entry.name} manifest missing 'name' field"
-            )
+            assert "name" in entry.manifest, f"Entry {entry.name} manifest missing 'name' field"

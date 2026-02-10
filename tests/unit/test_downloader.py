@@ -98,9 +98,7 @@ class TestDownload:
     def test_download_creates_model_directory(
         self, models_dir: Path, sample_entry: CatalogEntry
     ) -> None:
-        with patch(
-            "theo.registry.downloader.ModelDownloader.download"
-        ) as mock_download:
+        with patch("theo.registry.downloader.ModelDownloader.download") as mock_download:
             mock_download.return_value = models_dir / "faster-whisper-tiny"
             downloader = ModelDownloader(models_dir)
             result = downloader.download(sample_entry)
@@ -120,14 +118,13 @@ class TestDownload:
         self, models_dir: Path, entry_without_manifest: CatalogEntry
     ) -> None:
         """Download falha se catalogo nao tem manifesto."""
-        mock_snapshot = MagicMock(
-            return_value=str(models_dir / "no-manifest")
-        )
+        mock_snapshot = MagicMock(return_value=str(models_dir / "no-manifest"))
         with patch(
             "theo.registry.downloader.snapshot_download",
             mock_snapshot,
             create=True,
         ):
+
             async def patched_download(
                 self_inner: ModelDownloader,
                 entry: CatalogEntry,
@@ -143,9 +140,7 @@ class TestDownload:
             # Test _write_manifest directly
             downloader = ModelDownloader(models_dir)
             with pytest.raises(ValueError, match="sem manifesto"):
-                downloader._write_manifest(
-                    models_dir / "no-manifest", entry_without_manifest
-                )
+                downloader._write_manifest(models_dir / "no-manifest", entry_without_manifest)
 
 
 class TestWriteManifest:

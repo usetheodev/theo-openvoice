@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 from contextlib import asynccontextmanager
-from typing import Any, AsyncIterator
+from typing import TYPE_CHECKING, Any
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,22 +17,26 @@ from theo.config.preprocessing import PreprocessingConfig
 from theo.logging import get_logger
 from theo.postprocessing.itn import ITNStage
 from theo.postprocessing.pipeline import PostProcessingPipeline
-from theo.postprocessing.stages import TextStage
 from theo.preprocessing.dc_remove import DCRemoveStage
 from theo.preprocessing.gain_normalize import GainNormalizeStage
 from theo.preprocessing.pipeline import AudioPreprocessingPipeline
 from theo.preprocessing.resample import ResampleStage
-from theo.preprocessing.stages import AudioStage
 from theo.registry.registry import ModelRegistry
 from theo.scheduler.queue import RequestPriority
 from theo.scheduler.scheduler import Scheduler
 from theo.server.error_handlers import register_error_handlers
-from theo.server.routes import health, realtime, speech, transcriptions, translations
 from theo.server.models.requests import TranscribeRequest
+from theo.server.routes import health, realtime, speech, transcriptions, translations
 from theo.workers.manager import WorkerManager
 
 from .config import DemoConfig
 from .jobs import DemoJob, DemoJobStore
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
+    from theo.postprocessing.stages import TextStage
+    from theo.preprocessing.stages import AudioStage
 
 logger = get_logger("demo.backend")
 
@@ -250,7 +254,7 @@ def _register_demo_routes(app: FastAPI) -> None:
     @app.post("/demo/jobs")
     async def submit_job(
         request: Request,
-        file: UploadFile = File(...),
+        file: UploadFile = File(...),  # noqa: B008
         model: str = Form(...),
         priority: str = Form("BATCH"),
         language: str | None = Form(None),
@@ -267,7 +271,7 @@ def _register_demo_routes(app: FastAPI) -> None:
 
         try:
             request_priority = RequestPriority[priority.upper()]
-        except KeyError as exc:  # noqa: PERF203
+        except KeyError as exc:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Prioridade invalida. Use REALTIME ou BATCH.",
@@ -343,7 +347,7 @@ async def _finalize_job(app: FastAPI, request_id: str, future: asyncio.Future[An
     except asyncio.CancelledError:
         await store.update(request_id, status="cancelled")
         raise
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.error("demo_job_failed", request_id=request_id, error=str(exc))
         await store.update(request_id, status="failed", error=str(exc))
     else:

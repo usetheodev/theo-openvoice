@@ -83,9 +83,7 @@ class TestPsCommand:
         runner = CliRunner()
         result = runner.invoke(cli, ["ps", "--server", "http://custom:9000"])
         assert result.exit_code == 0
-        mock_get.assert_called_once_with(
-            "http://custom:9000/v1/models", timeout=10.0
-        )
+        mock_get.assert_called_once_with("http://custom:9000/v1/models", timeout=10.0)
 
     @patch("httpx.get")
     def test_ps_table_alignment(self, mock_get: MagicMock) -> None:

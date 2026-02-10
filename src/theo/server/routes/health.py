@@ -44,11 +44,13 @@ async def list_models(request: Request) -> dict[str, Any]:
     manifests = registry.list_models()
     models: list[dict[str, Any]] = []
     for m in manifests:
-        models.append({
-            "name": m.name,
-            "type": m.model_type.value,
-            "engine": m.engine,
-            "status": "loaded",
-        })
+        models.append(
+            {
+                "name": m.name,
+                "type": m.model_type.value,
+                "engine": m.engine,
+                "status": "loaded",
+            }
+        )
 
     return {"models": models}

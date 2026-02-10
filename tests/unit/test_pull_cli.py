@@ -32,9 +32,7 @@ class TestPullCommand:
         mock_downloader.download.return_value = tmp_path / "faster-whisper-tiny"
 
         runner = CliRunner()
-        result = runner.invoke(
-            cli, ["pull", "faster-whisper-tiny", "--models-dir", str(tmp_path)]
-        )
+        result = runner.invoke(cli, ["pull", "faster-whisper-tiny", "--models-dir", str(tmp_path)])
         assert result.exit_code == 0
         assert "Baixando" in result.output
         assert "instalado" in result.output.lower() or "Modelo instalado" in result.output
@@ -118,9 +116,7 @@ class TestPullCommand:
         mock_downloader = MagicMock()
         mock_downloader_cls.return_value = mock_downloader
         mock_downloader.is_installed.return_value = False
-        mock_downloader.download.side_effect = RuntimeError(
-            "huggingface_hub nao esta instalado"
-        )
+        mock_downloader.download.side_effect = RuntimeError("huggingface_hub nao esta instalado")
 
         runner = CliRunner()
         result = runner.invoke(cli, ["pull", "faster-whisper-tiny"])
