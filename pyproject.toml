@@ -37,13 +37,6 @@ classifiers = [
     "Typing :: Typed",
 ]
 
-[project.urls]
-Homepage = "https://github.com/usetheo/theo-openvoice"
-Documentation = "https://usetheo.github.io/theo-openvoice"
-Repository = "https://github.com/usetheo/theo-openvoice"
-"Bug Tracker" = "https://github.com/usetheo/theo-openvoice/issues"
-Changelog = "https://github.com/usetheo/theo-openvoice/blob/main/CHANGELOG.md"
-
 dependencies = [
     "pydantic>=2.6,<3.0",
     "pyyaml>=6.0,<7.0",
@@ -102,6 +95,13 @@ dev = [
 all = [
     "theo-openvoice[server,grpc,faster-whisper,wenet,itn,dev]",
 ]
+
+[project.urls]
+Homepage = "https://github.com/usetheo/theo-openvoice"
+Documentation = "https://usetheo.github.io/theo-openvoice"
+Repository = "https://github.com/usetheo/theo-openvoice"
+"Bug Tracker" = "https://github.com/usetheo/theo-openvoice/issues"
+Changelog = "https://github.com/usetheo/theo-openvoice/blob/main/CHANGELOG.md"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/theo"]

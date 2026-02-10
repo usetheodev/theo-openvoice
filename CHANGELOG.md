@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - GitHub issue and pull request templates (#release-oss)
 - Docusaurus documentation site scaffold with initial content (#release-oss)
 
+### Fixed
+- Package metadata layout in `pyproject.toml` to keep dependencies out of `project.urls` (#release-oss)
+
 ## [0.1.0] - 2026-02-10
 
 ### Added
