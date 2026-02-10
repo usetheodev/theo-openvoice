@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Package metadata layout in `pyproject.toml` to keep dependencies out of `project.urls` (#release-oss)
+- Restored `scripts/generate_proto.sh` for CI proto stub verification (#release-oss)
 
 ## [0.1.0] - 2026-02-10
 
