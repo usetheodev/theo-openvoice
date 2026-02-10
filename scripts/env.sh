@@ -10,7 +10,7 @@ export VERSION=${VERSION:-$(git describe --tags --first-parent --abbrev=7 --long
 export PYTHON_VERSION=${PYTHON_VERSION:-"3.12"}
 export PLATFORM=${PLATFORM:-"linux/arm64,linux/amd64"}
 export DOCKER_ORG=${DOCKER_ORG:-"usetheo"}
-export DOCKER_REPO=${DOCKER_REPO:-"${DOCKER_ORG}/theo-openvoice"}
+export DOCKER_REPO=${DOCKER_REPO:-"ghcr.io/${DOCKER_ORG}/theo-openvoice"}
 
 THEO_COMMON_BUILD_ARGS="--build-arg=VERSION \
     --build-arg=PYTHON_VERSION"

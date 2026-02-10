@@ -17,9 +17,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - NVIDIA GPU detection in install scripts with automatic `faster-whisper` extras installation (#install-scripts)
 - systemd service setup for Linux installs (configurable via `THEO_NO_SERVICE`) (#install-scripts)
 - Windows uninstall support via `THEO_UNINSTALL=1` environment variable (#install-scripts)
+- PyPI publish via OIDC trusted publisher in release workflow (#release-ci)
+- Docker image build and push to GHCR in release workflow: CPU multi-arch (amd64+arm64) and GPU (amd64) (#release-ci)
 - Open-source community files (CODE_OF_CONDUCT.md, SECURITY.md) (#release-oss)
 - GitHub issue and pull request templates (#release-oss)
 - Docusaurus documentation site scaffold with initial content (#release-oss)
+
+### Changed
+- Default Docker registry in `scripts/env.sh` from Docker Hub to GHCR (`ghcr.io/usetheo/theo-openvoice`) (#release-ci)
 
 ### Removed
 - Ollama-specific build scripts: `build_darwin.sh`, `build_windows.ps1`, `deduplicate_cuda_libs.sh` (#install-scripts)
