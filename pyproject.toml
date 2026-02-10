@@ -92,6 +92,7 @@ dev = [
     "scipy-stubs>=1.11",
     "fastapi>=0.115,<1.0",
     "starlette>=0.36,<1.0",
+    "python-multipart>=0.0.18",
     "openai>=1.0",
 ]
 all = [
